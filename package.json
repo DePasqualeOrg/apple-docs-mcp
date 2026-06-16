@@ -35,6 +35,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --watchAll=false",
+    "check:live": "pnpm run build && node scripts/realworld-check.mjs",
     "prepublishOnly": "pnpm run clean && pnpm run build && pnpm run test:ci",
     "release:patch": "npm version patch && git push origin main --tags && npm publish",
     "release:minor": "npm version minor && git push origin main --tags && npm publish",
@@ -55,23 +56,22 @@
   ],
   "author": "kimsungwhee",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",
-    "cheerio": "^1.1.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {
     "@jest/globals": "^30.0.4",
     "@types/jest": "^30.0.0",
-    "@types/jsdom": "^21.1.7",
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.1",
     "jest": "^30.0.4",
-    "jsdom": "^26.1.0",
     "ts-jest": "^29.4.0",
-    "tsx": "^4.20.3",
     "typescript": "^5.3.3"
   }
 }

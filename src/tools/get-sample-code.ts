@@ -106,21 +106,13 @@ export async function handleGetSampleCode(
     return cachedResult;
   }
 
-  // Fetch both JSON files
-  const [contentResponse, indexResponse] = await Promise.all([
-    httpClient.get(APPLE_URLS.SAMPLE_CODE_JSON),
-    httpClient.get(APPLE_URLS.SAMPLE_CODE_INDEX_JSON),
+  // Fetch both JSON files. getJson wraps transport and JSON-parse failures in a
+  // typed AppError (the HTTP client already throws on non-2xx responses), so a
+  // malformed body surfaces a friendly message rather than a raw SyntaxError.
+  const [contentData, indexData] = await Promise.all([
+    httpClient.getJson<SampleCodeContent>(APPLE_URLS.SAMPLE_CODE_JSON),
+    httpClient.getJson<SampleCodeIndex>(APPLE_URLS.SAMPLE_CODE_INDEX_JSON),
   ]);
-
-  if (!contentResponse.ok) {
-    throw new Error(`Failed to fetch sample code content: ${contentResponse.statusText}`);
-  }
-  if (!indexResponse.ok) {
-    throw new Error(`Failed to fetch sample code index: ${indexResponse.statusText}`);
-  }
-
-  const contentData = await contentResponse.json() as SampleCodeContent;
-  const indexData = await indexResponse.json() as SampleCodeIndex;
 
 
   // Parse the sample codes
@@ -214,7 +206,11 @@ function deduplicateSampleCodes(sampleCodes: ParsedSampleCode[]): ParsedSampleCo
     if (!existing) {
       uniqueCodes.set(code.path, code);
     } else {
-      // Merge properties, preferring non-empty values
+      // Merge properties, preferring non-empty values. `||` is intentional here:
+      // an empty string or `false` from `code` means "not specified", so the
+      // existing record's value should win — exactly the falsy-coalescing `??`
+      // would not provide.
+      /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
       uniqueCodes.set(code.path, {
         ...existing,
         framework: code.framework || existing.framework,
@@ -222,6 +218,7 @@ function deduplicateSampleCodes(sampleCodes: ParsedSampleCode[]): ParsedSampleCo
         beta: code.beta || existing.beta,
         depth: Math.min(code.depth, existing.depth),
       });
+      /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
     }
   }
 
@@ -254,8 +251,11 @@ function processSampleCodeNodes(
       const docUrl = pathToDocUrl(node.path);
       const frameworkFromMap = frameworkMap.get(docUrl);
 
-      // Priority: path > map > groupMarker
+      // Priority: path > map > groupMarker. `||` is intentional: an empty
+      // extraction result should fall through to the next source, which `??`
+      // (nullish-only) would not do.
       const framework = normalizeFrameworkName(
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         frameworkFromPath || frameworkFromMap || currentFramework,
       );
 
@@ -264,7 +264,7 @@ function processSampleCodeNodes(
         title: node.title,
         framework: framework || undefined,
         description: undefined, // Could be extracted from the content if needed
-        beta: node.beta || false,
+        beta: node.beta ?? false,
         featured: featuredIds.has(docUrl),
         url: `https://developer.apple.com${node.path}`,
         path: node.path,
@@ -282,7 +282,7 @@ function processSampleCodeNodes(
  */
 function extractFrameworkFromPath(path: string): string | null {
   // Match pattern like /documentation/framework/...
-  const match = path.match(/^\/documentation\/([^\/]+)\//);
+  const match = path.match(/^\/documentation\/([^/]+)\//);
   if (match) {
     const framework = match[1];
     // Don't return generic paths like 'samplecode'
@@ -310,7 +310,7 @@ function applySampleCodeFilters(sampleCodes: ParsedSampleCode[], filters: Sample
     // Framework filter - normalize both for comparison
     if (filters.framework) {
       const normalizedFilterFramework = normalizeFrameworkName(filters.framework);
-      const normalizedCodeFramework = normalizeFrameworkName(code.framework || '');
+      const normalizedCodeFramework = normalizeFrameworkName(code.framework ?? '');
 
       // Check for exact match or inclusion
       const frameworkLower = normalizedFilterFramework.toLowerCase();
@@ -355,7 +355,7 @@ function applySampleCodeFilters(sampleCodes: ParsedSampleCode[], filters: Sample
       }
 
       // Framework match
-      const frameworkLower = (code.framework || '').toLowerCase();
+      const frameworkLower = (code.framework ?? '').toLowerCase();
       if (frameworkLower.includes(query)) {
         matchScore += 2;
       }
@@ -367,7 +367,7 @@ function applySampleCodeFilters(sampleCodes: ParsedSampleCode[], filters: Sample
       }
 
       // Description match (if available)
-      const descriptionLower = (code.description || '').toLowerCase();
+      const descriptionLower = (code.description ?? '').toLowerCase();
       if (descriptionLower.includes(query)) {
         matchScore += 1;
       }
@@ -433,7 +433,7 @@ function formatSampleCodeResult(
   const noCategory: ParsedSampleCode[] = [];
 
   for (const code of sampleCodes) {
-    const category = code.framework || '';
+    const category = code.framework ?? '';
     if (category) {
       // Group WWDC samples together
       const normalizedCategory = category.match(/^WWDC\d+$/i) ? category.toUpperCase() : category;

@@ -1,0 +1,36 @@
+# Dev container Compose file.
+#
+# Usage:
+#   Open the folder in your editor and "Reopen in Container", or run commands
+#   through scripts/dx, which starts this on first use:
+#     scripts/dx pnpm test
+#
+# apple-docs-mcp is an MCP stdio server: it has no dev server and no ports to
+# forward, so none are published. Dependencies are baked into the image and kept
+# in named volumes, never on the host bind mount.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      # Mount source code so edits on the host are seen immediately.
+      - .:/workspace
+      # Keep node_modules in a named volume (not on the host bind mount).
+      - node_modules:/workspace/node_modules
+      # Keep the pnpm store in a named volume too (persists across rebuilds,
+      # stays off the host bind mount). Matches npm_config_store_dir in the image.
+      - pnpm_store:/workspace/.pnpm-store
+      # Exclude .git from the bind mount (uses an anonymous volume).
+      - /workspace/.git
+      # Persistent dev-container state.
+      - bash_history:/commandhistory
+      - claude_config:/home/node/.claude
+    restart: 'no'
+
+volumes:
+  node_modules:
+  pnpm_store:
+  bash_history:
+  claude_config:

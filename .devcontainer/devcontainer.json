@@ -1,0 +1,22 @@
+// Reference: https://github.com/anthropics/claude-code/tree/main/.devcontainer
+// Depends on the shared `devcontainer-base` image, built from the sibling
+// `devcontainer-base` project (`./build.sh`).
+
+{
+  "name": "apple-docs-mcp",
+  "dockerComposeFile": "../docker-compose.dev.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next",
+        "anthropic.claude-code"
+      ],
+      "settings": {}
+    }
+  },
+  "postCreateCommand": "echo 'Dev container ready'"
+}

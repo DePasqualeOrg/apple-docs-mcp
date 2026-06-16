@@ -5,6 +5,8 @@ import { convertToJsonApiUrl } from '../../src/utils/url-converter.js';
 
 jest.mock('../../src/utils/http-client.js');
 jest.mock('../../src/utils/url-converter.js', () => ({
+  // Keep the real helpers (e.g. toAbsoluteAppleUrl) and mock only the converter.
+  ...jest.requireActual('../../src/utils/url-converter.js'),
   convertToJsonApiUrl: jest.fn(),
   isValidAppleDeveloperUrl: jest.fn().mockReturnValue(true),
 }));

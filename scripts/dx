@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run a command inside the dev container so third-party dependency code never
+# executes on the host. Source files are edited on the host and bind-mounted in;
+# node_modules lives in a Docker volume (there is no host node_modules), so pnpm,
+# node, builds, and tests must run through this wrapper.
+#
+# Usage:
+#   scripts/dx pnpm run build
+#   scripts/dx pnpm test
+#   scripts/dx pnpm run lint
+#   scripts/dx pnpm exec tsc --noEmit
+#
+# The container starts on first use (building the image, which installs
+# dependencies inside it). After changing dependencies, rebuild the image:
+#   docker compose -f docker-compose.dev.yml up -d --build app
+set -euo pipefail
+cd "$(dirname "$0")/.."
+compose=(docker compose -f docker-compose.dev.yml)
+
+if [ -z "$("${compose[@]}" ps --status running -q app 2>/dev/null)" ]; then
+	"${compose[@]}" up -d app
+fi
+
+exec "${compose[@]}" exec -T app "$@"

@@ -1,10 +1,11 @@
-import { convertToJsonApiUrl } from '../utils/url-converter.js';
+import { convertToJsonApiUrl, toAbsoluteAppleUrl } from '../utils/url-converter.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/error-handler.js';
 import { PROCESSING_LIMITS } from '../utils/constants.js';
 
 /**
- * 关联API信息接口
+ * Related API info
  */
 interface RelatedAPI {
   title: string;
@@ -26,10 +27,22 @@ interface SeeAlsoSection {
   identifiers: string[];
 }
 
+/**
+ * A single entry in Apple's render-JSON `references` map (only the fields used
+ * here are modeled).
+ */
+interface DocReference {
+  title?: string;
+  url?: string;
+  kind?: string;
+  type?: string;
+  abstract?: Array<{ text?: string }>;
+}
+
 interface AppleDocData {
   relationshipsSections?: RelationshipSection[];
   seeAlsoSections?: SeeAlsoSection[];
-  references?: Record<string, any>;
+  references?: Record<string, DocReference>;
   topicSections?: Array<{
     title: string;
     identifiers: string[];
@@ -37,7 +50,7 @@ interface AppleDocData {
 }
 
 /**
- * 获取相关API
+ * Get related APIs
  */
 export async function handleGetRelatedApis(
   apiUrl: string,
@@ -48,7 +61,7 @@ export async function handleGetRelatedApis(
   try {
     logger.info(`Fetching related APIs for: ${apiUrl}`);
 
-    // 将网页URL转换为JSON API URL
+    // Convert the web URL to a JSON API URL
     const jsonApiUrl = convertToJsonApiUrl(apiUrl);
 
     if (!jsonApiUrl) {
@@ -57,10 +70,10 @@ export async function handleGetRelatedApis(
 
     const data = await httpClient.getJson<AppleDocData>(jsonApiUrl);
 
-    // 收集所有相关API
+    // Collect all related APIs
     const relatedApis: RelatedAPI[] = [];
 
-    // 处理关系部分（继承、一致性等）
+    // Process the relationships sections (inheritance, conformance, etc.)
     if (data.relationshipsSections) {
       for (const section of data.relationshipsSections) {
         const shouldInclude =
@@ -78,7 +91,7 @@ export async function handleGetRelatedApis(
       }
     }
 
-    // 处理"另请参阅"部分
+    // Process the "See Also" section
     if (includeSeeAlso && data.seeAlsoSections) {
       for (const section of data.seeAlsoSections) {
         if (section.identifiers) {
@@ -92,11 +105,11 @@ export async function handleGetRelatedApis(
       }
     }
 
-    // 处理主题部分的相关API
+    // Process related APIs from the topic sections
     if (data.topicSections) {
       for (const section of data.topicSections) {
         if (section.identifiers && section.identifiers.length > 0) {
-          // 只取前3个，避免过多
+          // take only the first 3 to avoid too many
           const limitedIdentifiers = section.identifiers.slice(0, PROCESSING_LIMITS.MAX_RELATED_APIS_PER_SECTION);
           for (const identifier of limitedIdentifiers) {
             const api = extractApiFromIdentifier(identifier, `Related: ${section.title}`, data.references);
@@ -108,14 +121,14 @@ export async function handleGetRelatedApis(
       }
     }
 
-    // 去重
+    // Deduplicate
     const uniqueApis = deduplicateApis(relatedApis);
 
-    // 格式化输出
+    // Format the output
     return formatRelatedApis(apiUrl, uniqueApis);
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to get related APIs: ${errorMessage}`;
   }
 }
@@ -123,31 +136,31 @@ export async function handleGetRelatedApis(
 
 
 /**
- * 从标识符提取API信息
+ * Extract API info from an identifier
  */
 function extractApiFromIdentifier(
   identifier: string,
   relationship: string,
-  references?: Record<string, any>,
+  references?: Record<string, DocReference>,
 ): RelatedAPI | null {
-  // 先从references中查找
+  // First look in references
   if (references?.[identifier]) {
     const ref = references[identifier];
     return {
-      title: ref.title || 'Unknown',
-      url: ref.url ? `https://developer.apple.com${ref.url}` : '#',
+      title: ref.title ?? 'Unknown',
+      url: toAbsoluteAppleUrl(ref.url),
       identifier,
-      type: ref.kind || ref.type || 'unknown',
+      type: ref.kind ?? ref.type ?? 'unknown',
       relationship,
-      abstract: ref.abstract ? ref.abstract.map((a: any) => a.text || '').join(' ').trim() : undefined,
+      abstract: ref.abstract ? ref.abstract.map((a) => a.text ?? '').join(' ').trim() : undefined,
     };
   }
 
-  // 如果references中没有，尝试解析标识符
+  // If not in references, try to parse the identifier
   if (identifier.startsWith('doc://')) {
     const parts = identifier.split('/');
     const apiName = parts[parts.length - 1] || 'Unknown';
-    const pathPart = identifier.replace(/^doc:\/\/[^\/]+\/documentation\//, '');
+    const pathPart = identifier.replace(/^doc:\/\/[^/]+\/documentation\//, '');
 
     return {
       title: apiName,
@@ -162,7 +175,7 @@ function extractApiFromIdentifier(
 }
 
 /**
- * 去重API列表
+ * Deduplicate the API list
  */
 function deduplicateApis(apis: RelatedAPI[]): RelatedAPI[] {
   const seen = new Set<string>();
@@ -176,19 +189,20 @@ function deduplicateApis(apis: RelatedAPI[]): RelatedAPI[] {
 }
 
 /**
- * 格式化相关API输出
+ * Format the related-API output
  */
 function formatRelatedApis(originalUrl: string, relatedApis: RelatedAPI[]): string {
   if (relatedApis.length === 0) {
     return `No related APIs found for: ${originalUrl}`;
   }
 
-  const apiName = new URL(originalUrl).pathname.split('/').pop() || 'API';
+  // filter(Boolean) drops empty segments so a trailing slash doesn't yield ''.
+  const apiName = new URL(originalUrl).pathname.split('/').filter(Boolean).pop() ?? 'API';
   let content = `# Related APIs for ${apiName}\n\n`;
   content += `**Source:** [${originalUrl}](${originalUrl})\n\n`;
   content += `**Found ${relatedApis.length} related APIs:**\n\n`;
 
-  // 按关系类型分组
+  // Group by relationship type
   const groupedApis = groupApisByRelationship(relatedApis);
 
   for (const [relationship, apis] of Object.entries(groupedApis)) {
@@ -211,7 +225,7 @@ function formatRelatedApis(originalUrl: string, relatedApis: RelatedAPI[]): stri
 }
 
 /**
- * 按关系类型分组API
+ * Group APIs by relationship type
  */
 function groupApisByRelationship(apis: RelatedAPI[]): Record<string, RelatedAPI[]> {
   const groups: Record<string, RelatedAPI[]> = {};

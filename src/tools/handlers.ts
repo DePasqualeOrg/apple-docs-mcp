@@ -31,97 +31,128 @@ import {
   handleBrowseWWDCTopics,
   handleFindRelatedWWDCVideos,
   handleListWWDCYears,
+  wwdcFreshnessNote,
 } from './wwdc/wwdc-handlers.js';
+import { loadGlobalMetadata } from '../utils/wwdc-data-source.js';
+import { getErrorMessage } from '../utils/error-handler.js';
+
+/**
+ * Wrap a WWDC handler's text output in an MCP response, appending the data
+ * freshness footer once. Centralizing this here keeps the footer consistent
+ * across all WWDC tools. Error strings and metadata-load failures are returned
+ * unchanged so the footer never masks or duplicates an error.
+ */
+async function wwdcToolResult(
+  text: string,
+): Promise<{ content: Array<{ type: string; text: string }> }> {
+  if (text.startsWith('Error:')) {
+    return { content: [{ type: 'text', text }] };
+  }
+  try {
+    const metadata = await loadGlobalMetadata();
+    // trimEnd so a body already ending in a blank line doesn't stack up to a
+    // triple blank line before the footer.
+    return { content: [{ type: 'text', text: `${text.trimEnd()}\n\n${wwdcFreshnessNote(metadata)}` }] };
+  } catch {
+    return { content: [{ type: 'text', text }] };
+  }
+}
+
+/**
+ * The MCP tool response shape every handler returns. Declared as a `type` (not
+ * an `interface`) so it keeps an implicit index signature and stays assignable
+ * to the MCP SDK's loose `ServerResult` return type at the request-handler call
+ * site.
+ */
+export type ToolResponse = {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+};
+
+/**
+ * The subset of the server the tool dispatcher invokes. Declaring it as an
+ * interface (rather than `any`) means handler→server calls are type-checked and
+ * the server class is verified to implement this contract. Parameters mirror the
+ * server's method signatures; defaulted parameters are optional here.
+ */
+export interface DocsServer {
+  searchAppleDocs(query: string, type?: string): Promise<ToolResponse>;
+  getAppleDocContent(
+    url: string,
+    includeRelatedApis?: boolean,
+    includeReferences?: boolean,
+    includeSimilarApis?: boolean,
+    includePlatformAnalysis?: boolean,
+  ): Promise<ToolResponse>;
+  listTechnologies(
+    category?: string,
+    language?: string,
+    includeBeta?: boolean,
+    limit?: number,
+  ): Promise<ToolResponse>;
+  searchFrameworkSymbols(
+    framework: string,
+    symbolType?: string,
+    namePattern?: string,
+    language?: string,
+    limit?: number,
+  ): Promise<ToolResponse>;
+  getRelatedApis(
+    apiUrl: string,
+    includeInherited?: boolean,
+    includeConformance?: boolean,
+    includeSeeAlso?: boolean,
+  ): Promise<ToolResponse>;
+  resolveReferencesBatch(
+    sourceUrl: string,
+    maxReferences?: number,
+    filterByType?: string,
+  ): Promise<ToolResponse>;
+  getPlatformCompatibility(
+    apiUrl: string,
+    compareMode?: string,
+    includeRelated?: boolean,
+  ): Promise<ToolResponse>;
+  findSimilarApis(
+    apiUrl: string,
+    searchDepth?: string,
+    filterByCategory?: string,
+    includeAlternatives?: boolean,
+  ): Promise<ToolResponse>;
+  getDocumentationUpdates(
+    category?: string,
+    technology?: string,
+    year?: string,
+    searchQuery?: string,
+    includeBeta?: boolean,
+    limit?: number,
+  ): Promise<ToolResponse>;
+  getTechnologyOverviews(
+    category?: string,
+    searchQuery?: string,
+    includeSubcategories?: boolean,
+    limit?: number,
+  ): Promise<ToolResponse>;
+  getSampleCode(
+    framework?: string,
+    beta?: 'include' | 'exclude' | 'only',
+    searchQuery?: string,
+    limit?: number,
+  ): Promise<ToolResponse>;
+}
 
 /**
  * Tool handler function type
  */
 export type ToolHandler = (
   args: unknown,
-  server: any
-) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
+  server: DocsServer
+) => Promise<ToolResponse>;
 
 /**
  * Map of tool names to their handlers
  */
 export const toolHandlers: Record<string, ToolHandler> = {
-  get_performance_report: async () => {
-    const { httpClient } = await import('../utils/http-client.js');
-    const { getCacheWarmUpStatus } = await import('../utils/cache-warmer.js');
-    const { getPreloadStats } = await import('../utils/preloader.js');
-    const { globalRateLimiter } = await import('../utils/rate-limiter.js');
-
-    let report = '# Performance Report\n\n';
-
-    // HTTP Client Performance
-    report += httpClient.getPerformanceReport();
-    report += '\n\n';
-
-    // Cache Warm-up Status
-    const warmUpStatus = getCacheWarmUpStatus();
-    report += '## Cache Warm-up Status\n\n';
-    report += `- **Total Cache Entries:** ${warmUpStatus.totalCacheEntries}\n`;
-    report += `- **API Cache:** ${warmUpStatus.apiCacheSize} entries\n`;
-    report += `- **Technologies Cache:** ${warmUpStatus.technologiesCacheSize} entries\n`;
-    report += `- **Updates Cache:** ${warmUpStatus.updatesCacheSize} entries\n`;
-    report += `- **Overviews Cache:** ${warmUpStatus.overviewsCacheSize} entries\n\n`;
-
-    // Framework Preload Status
-    const preloadStats = getPreloadStats();
-    report += '## Framework Preload Status\n\n';
-    report += `- **Preloaded Frameworks:** ${preloadStats.preloadedFrameworks.join(', ')}\n`;
-    report += `- **Index Cache Hit Rate:** ${preloadStats.cacheHitRate}\n\n`;
-
-    // Rate Limiter Status
-    const rateLimiterStats = globalRateLimiter.getStats();
-    report += '## Rate Limiter Status\n\n';
-    report += `- **Current Requests:** ${rateLimiterStats.currentRequests}/${rateLimiterStats.maxRequests}\n`;
-    report += `- **Utilization:** ${rateLimiterStats.utilizationRate}\n`;
-    report += `- **Window:** ${rateLimiterStats.windowMs / 1000}s\n`;
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: report,
-        },
-      ],
-    };
-  },
-
-  get_cache_stats: async () => {
-    const { apiCache, searchCache, indexCache, technologiesCache, updatesCache, sampleCodeCache, technologyOverviewsCache } = await import('../utils/cache.js');
-
-    const stats = {
-      apiCache: apiCache.getStats(),
-      searchCache: searchCache.getStats(),
-      indexCache: indexCache.getStats(),
-      technologiesCache: technologiesCache.getStats(),
-      updatesCache: updatesCache.getStats(),
-      sampleCodeCache: sampleCodeCache.getStats(),
-      technologyOverviewsCache: technologyOverviewsCache.getStats(),
-    };
-
-    let report = '# Cache Statistics Report\n\n';
-
-    Object.entries(stats).forEach(([name, stat]) => {
-      report += `## ${name}\n`;
-      report += `- Size: ${stat.size}/${stat.maxSize}\n`;
-      report += `- Hit Rate: ${stat.hitRate}\n`;
-      report += `- Hits: ${stat.hits}\n`;
-      report += `- Misses: ${stat.misses}\n\n`;
-    });
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: report,
-        },
-      ],
-    };
-  },
-
   search_apple_docs: async (args, server) => {
     const validatedArgs = searchAppleDocsSchema.parse(args);
     return await server.searchAppleDocs(validatedArgs.query, validatedArgs.type);
@@ -213,7 +244,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
     const validatedArgs = getTechnologyOverviewsSchema.parse(args);
     return await server.getTechnologyOverviews(
       validatedArgs.category,
-      validatedArgs.platform,
       validatedArgs.searchQuery,
       validatedArgs.includeSubcategories,
       validatedArgs.limit,
@@ -239,7 +269,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.hasCode,
       validatedArgs.limit,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   search_wwdc_content: async (args, _server) => {
@@ -251,7 +281,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.language,
       validatedArgs.limit,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   get_wwdc_video: async (args, _server) => {
@@ -262,7 +292,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.includeTranscript,
       validatedArgs.includeCode,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   get_wwdc_code_examples: async (args, _server) => {
@@ -274,7 +304,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.language,
       validatedArgs.limit,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   browse_wwdc_topics: async (args, _server) => {
@@ -285,7 +315,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.year,
       validatedArgs.limit,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   find_related_wwdc_videos: async (args, _server) => {
@@ -298,12 +328,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
       validatedArgs.includeYearRelated,
       validatedArgs.limit,
     );
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 
   list_wwdc_years: async (_args, _server) => {
     const result = await handleListWWDCYears();
-    return { content: [{ type: 'text', text: result }] };
+    return wwdcToolResult(result);
   },
 };
 
@@ -313,21 +343,21 @@ export const toolHandlers: Record<string, ToolHandler> = {
 export async function handleToolCall(
   toolName: string,
   args: unknown,
-  server: any,
-): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
+  server: DocsServer,
+): Promise<ToolResponse> {
   try {
     const handler = toolHandlers[toolName];
     if (!handler) {
       throw new Error(`Unknown tool: ${toolName}`);
     }
 
-    return await handler(args, server) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    return await handler(args, server);
   } catch (error) {
     // Return error response for validation errors and unknown tools
     return {
       content: [{
         type: 'text',
-        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        text: `Error: ${getErrorMessage(error)}`,
       }],
       isError: true,
     };

@@ -2,9 +2,10 @@ import { technologiesCache, generateUrlCacheKey } from '../utils/cache.js';
 import { APPLE_URLS, API_LIMITS } from '../utils/constants.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/error-handler.js';
 
 /**
- * 技术信息接口
+ * Technology info
  */
 interface Technology {
   title: string;
@@ -30,7 +31,7 @@ interface TechnologiesData {
 }
 
 /**
- * 获取技术列表
+ * Get the list of technologies
  */
 export async function handleListTechnologies(
   category?: string,
@@ -51,13 +52,13 @@ export async function handleListTechnologies(
       return cachedResult;
     }
 
-    // 获取技术列表
+    // Fetch the technologies list
     const data = await httpClient.getJson<TechnologiesData>(APPLE_URLS.TECHNOLOGIES_JSON);
 
-    // 解析技术列表
+    // Parse the technologies list
     const technologies = parseTechnologies(data);
 
-    // 应用过滤器
+    // Apply filters
     const filteredTechnologies = applyTechnologyFilters(technologies, {
       category,
       language,
@@ -65,7 +66,7 @@ export async function handleListTechnologies(
       limit,
     });
 
-    // 格式化输出
+    // Format the output
     const result = formatTechnologiesList(filteredTechnologies);
 
     // Cache the result
@@ -74,13 +75,13 @@ export async function handleListTechnologies(
     return result;
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to list technologies: ${errorMessage}`;
   }
 }
 
 /**
- * 解析技术数据
+ * Parse the technology data
  */
 function parseTechnologies(data: TechnologiesData): TechnologyGroup[] {
   const groups: TechnologyGroup[] = [];
@@ -92,7 +93,7 @@ function parseTechnologies(data: TechnologiesData): TechnologyGroup[] {
           if (group.technologies && Array.isArray(group.technologies)) {
             const technologies: Technology[] = group.technologies.map(tech => ({
               title: tech.title || '',
-              identifier: tech.destination?.identifier || tech.identifier || '',
+              identifier: tech.destination?.identifier ?? tech.identifier ?? '',
               tags: tech.tags || [],
               languages: tech.languages || [],
               url: tech.destination?.identifier
@@ -114,7 +115,16 @@ function parseTechnologies(data: TechnologiesData): TechnologyGroup[] {
 }
 
 /**
- * 应用过滤器
+ * Normalize a category string for tolerant matching: lowercase, "&" → "and",
+ * and strip every non-alphanumeric character. This collapses "Graphics & Games",
+ * "graphics-and-games", and "graphics and games" to the same key.
+ */
+function normalizeCategory(value: string): string {
+  return value.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Apply filters
  */
 function applyTechnologyFilters(
   groups: TechnologyGroup[],
@@ -127,19 +137,21 @@ function applyTechnologyFilters(
 ): TechnologyGroup[] {
   let filteredGroups = groups
     .map(group => {
-      // 分类过滤
-      if (filters.category && !group.name.toLowerCase().includes(filters.category.toLowerCase())) {
+      // Filter by category. Match on a normalized form so slug-style inputs
+      // ("graphics-and-games") and display names ("Graphics & Games") both work,
+      // rather than only a raw substring of the display name.
+      if (filters.category && !normalizeCategory(group.name).includes(normalizeCategory(filters.category))) {
         return null;
       }
 
-      // 技术过滤
+      // Filter by technology
       const filteredTechnologies = group.technologies.filter(tech => {
-        // Beta 过滤
+        // Beta filter
         if (!filters.includeBeta && tech.tags.includes('Beta')) {
           return false;
         }
 
-        // 语言过滤
+        // Language filter
         if (filters.language && !tech.languages.includes(filters.language)) {
           return false;
         }
@@ -153,10 +165,10 @@ function applyTechnologyFilters(
     })
     .filter((group): group is TechnologyGroup => group !== null);
 
-  // 应用 limit 限制
+  // Apply the limit
   if (filters.limit !== undefined && filters.limit >= 0) {
     if (filters.limit === 0) {
-      // 如果 limit 为 0，返回空数组
+      // If limit is 0, return an empty array
       return [];
     }
 
@@ -181,7 +193,7 @@ function applyTechnologyFilters(
 }
 
 /**
- * 格式化技术列表
+ * Format the technologies list
  */
 function formatTechnologiesList(groups: TechnologyGroup[]): string {
   if (groups.length === 0) {
@@ -190,7 +202,7 @@ function formatTechnologiesList(groups: TechnologyGroup[]): string {
 
   let content = '# Apple Developer Technologies\n\n';
 
-  // 统计信息
+  // Statistics
   const totalTechs = groups.reduce((sum, group) => sum + group.technologies.length, 0);
   const betaTechs = groups.reduce((sum, group) =>
     sum + group.technologies.filter(tech => tech.tags.includes('Beta')).length, 0);
@@ -201,7 +213,7 @@ function formatTechnologiesList(groups: TechnologyGroup[]): string {
   }
   content += '*\n\n';
 
-  // 按分类显示
+  // Display by category
   groups.forEach(group => {
     content += `## ${group.name}\n\n`;
 
@@ -210,7 +222,7 @@ function formatTechnologiesList(groups: TechnologyGroup[]): string {
       const isBeta = tech.tags.includes('Beta');
       const titleWithStatus = isBeta ? `${tech.title} (Beta)` : tech.title;
 
-      content += `### [${titleWithStatus}](${tech.url || '#'})\n`;
+      content += `### [${titleWithStatus}](${tech.url ?? '#'})\n`;
 
       // Build metadata array
       const metadata = [];

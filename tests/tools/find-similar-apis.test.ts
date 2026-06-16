@@ -5,6 +5,8 @@ import { convertToJsonApiUrl } from '../../src/utils/url-converter.js';
 
 jest.mock('../../src/utils/http-client.js');
 jest.mock('../../src/utils/url-converter.js', () => ({
+  // Keep the real helpers (e.g. toAbsoluteAppleUrl) and mock only the converter.
+  ...jest.requireActual('../../src/utils/url-converter.js'),
   convertToJsonApiUrl: jest.fn(),
   convertToJsonUrl: jest.fn(),
   isValidAppleDeveloperUrl: jest.fn().mockReturnValue(true),
@@ -80,6 +82,37 @@ describe('find-similar-apis', () => {
       expect(result).toContain('A view that displays text and an icon.');
       expect(result).toContain('### [TextField]');
       expect(result).toContain('2 similar APIs found');
+    });
+
+    it('scores deprecated see-also siblings low instead of a flat 8/10', async () => {
+      mockHttpClient.getJson.mockResolvedValue({
+        data: {
+          identifier: 'uikit/uialertview',
+          title: 'UIAlertView',
+          metadata: { roleHeading: 'Class', platforms: [{ name: 'iOS', introducedAt: '2.0' }] },
+          seeAlsoSections: [
+            { title: 'Deprecated classes', identifiers: ['uikit/uiactionsheet'] },
+          ],
+        },
+        references: {
+          'uikit/uiactionsheet': {
+            title: 'UIActionSheet',
+            url: '/documentation/uikit/uiactionsheet',
+            abstract: [{ text: 'A deprecated way to present alternatives.' }],
+          },
+        },
+      });
+
+      const result = await handleFindSimilarApis(
+        'https://developer.apple.com/documentation/uikit/uialertview',
+        'shallow',
+      );
+
+      expect(result).toContain('## See Also: Deprecated classes');
+      expect(result).toContain('### [UIActionSheet]');
+      expect(result).toContain('Similarity: 3/10');       // low, honest score
+      expect(result).not.toContain('Similarity: 8/10');    // not inflated
+      expect(result).not.toContain('**Highly Similar APIs:**'); // 3 < 7 threshold
     });
 
     it('should include topic sections with medium search depth', async () => {

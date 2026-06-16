@@ -22,9 +22,6 @@ jest.mock('../../src/utils/wwdc-data-source.js', () => ({
   loadTopicIndex: jest.fn(),
   loadYearIndex: jest.fn(),
   loadVideoData: jest.fn(),
-  loadAllVideos: jest.fn(),
-  clearDataCache: jest.fn(),
-  isDataAvailable: jest.fn().mockResolvedValue(true),
 }));
 
 // Mock the doc-fetcher module

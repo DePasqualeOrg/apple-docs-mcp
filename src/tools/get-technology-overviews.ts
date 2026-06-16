@@ -2,6 +2,7 @@ import { technologyOverviewsCache, generateUrlCacheKey } from '../utils/cache.js
 import { APPLE_URLS } from '../utils/constants.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { toAbsoluteAppleUrl } from '../utils/url-converter.js';
 
 /**
  * Interface for Technology Overviews data
@@ -43,7 +44,6 @@ interface TechnologyOverviewsIndexSection {
  */
 export async function handleGetTechnologyOverviews(
   category?: string,
-  platform: string = 'all',
   searchQuery?: string,
   includeSubcategories: boolean = true,
   limit: number = 50,
@@ -54,7 +54,6 @@ export async function handleGetTechnologyOverviews(
     // Generate cache key
     const cacheKey = generateUrlCacheKey('technology-overviews', {
       category,
-      platform,
       searchQuery,
       includeSubcategories,
       limit,
@@ -77,7 +76,6 @@ export async function handleGetTechnologyOverviews(
     const overviews = parseOverviews(overviewsData, overviewsIndex);
     const filteredOverviews = applyOverviewsFilters(overviews, {
       category,
-      platform,
       searchQuery,
       includeSubcategories,
       limit,
@@ -121,7 +119,7 @@ function parseOverviews(overviewsData: TechnologyOverviewsData, overviewsIndex: 
 
           const overviewItem: OverviewItem = {
             title: reference.title,
-            url: reference.url ? `https://developer.apple.com${reference.url}` : '',
+            url: toAbsoluteAppleUrl(reference.url, ''),
             description,
             category: extractCategoryFromUrl(reference.url),
             type: reference.kind ?? 'overview',
@@ -185,7 +183,7 @@ function processIndexSection(sections: TechnologyOverviewsIndexSection[], overvi
         identifier: section.path,
         path: section.path,
         depth,
-        sectionTitle: currentSection || '',
+        sectionTitle: currentSection ?? '',
       };
       overviews.push(newOverview);
     }
@@ -212,7 +210,6 @@ function applyOverviewsFilters(
   overviews: OverviewItem[],
   filters: {
     category?: string;
-    platform?: string;
     searchQuery?: string;
     includeSubcategories?: boolean;
     limit?: number;
@@ -233,6 +230,9 @@ function applyOverviewsFilters(
 
     // If we found category items, also include their children
     if (categoryItems.length > 0) {
+      // `||` (not `??`) is intentional throughout this block: prefer a non-empty
+      // `path`, falling back to `url` when `path` is missing or empty.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
       const categoryPaths = categoryItems.map(item => item.path || item.url);
 
       filtered = overviews.filter(overview => {
@@ -241,8 +241,10 @@ function applyOverviewsFilters(
           return true;
         }
 
-        // Include children of category items
+        // Include children of category items (prefer non-empty path, else url)
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         if (overview.path || overview.url) {
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
           const overviewPath = (overview.path || overview.url).replace('https://developer.apple.com', '');
           return categoryPaths.some(categoryPath => {
             const cleanCategoryPath = categoryPath.replace('https://developer.apple.com', '');
@@ -256,16 +258,6 @@ function applyOverviewsFilters(
       // No matching category found
       filtered = [];
     }
-  }
-
-  // Platform filter
-  if (filters.platform && filters.platform !== 'all') {
-    const platformLower = filters.platform.toLowerCase();
-    filtered = filtered.filter(overview =>
-      overview.title.toLowerCase().includes(platformLower) ||
-      overview.description.toLowerCase().includes(platformLower) ||
-      overview.path?.toLowerCase().includes(platformLower),
-    );
   }
 
   // Search query filter

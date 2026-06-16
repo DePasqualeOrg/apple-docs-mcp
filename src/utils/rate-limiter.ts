@@ -15,19 +15,31 @@ export class RateLimiter {
   }
 
   /**
-   * Check if a request can be made
+   * Reserve a request slot, waiting if the window is currently full.
+   *
+   * This applies backpressure (the caller awaits) rather than throwing, so a
+   * burst is paced instead of failing. With the HTTP client's small concurrency
+   * cap the limiter rarely trips; when it does, callers wait until the oldest
+   * in-window request ages out.
    */
-  canMakeRequest(): boolean {
-    const now = Date.now();
-    // Remove old requests outside the time window
-    this.requests = this.requests.filter(time => now - time < this.windowMs);
+  async acquire(): Promise<void> {
+    for (;;) {
+      const now = Date.now();
+      // Remove old requests outside the time window
+      this.requests = this.requests.filter(time => now - time < this.windowMs);
 
-    if (this.requests.length >= this.maxRequests) {
-      return false;
+      if (this.requests.length < this.maxRequests) {
+        this.requests.push(now);
+        return;
+      }
+
+      // Wait until the oldest in-window request expires, then re-check.
+      // `oldest` is defined here (the window is full, so at least one request
+      // exists); the fallback guards a misconfigured maxRequests of 0.
+      const oldest = this.requests[0] ?? now;
+      const waitMs = this.windowMs - (now - oldest) + 1;
+      await new Promise<void>(resolve => setTimeout(resolve, Math.max(waitMs, 0)));
     }
-
-    this.requests.push(now);
-    return true;
   }
 
   /**

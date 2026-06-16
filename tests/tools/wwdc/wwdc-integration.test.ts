@@ -17,14 +17,12 @@ import {
   loadTopicIndex,
   loadYearIndex,
   loadVideoData,
-  loadAllVideos,
 } from '../../../src/utils/wwdc-data-source';
 
 const mockLoadGlobalMetadata = loadGlobalMetadata as jest.MockedFunction<typeof loadGlobalMetadata>;
 const mockLoadTopicIndex = loadTopicIndex as jest.MockedFunction<typeof loadTopicIndex>;
 const mockLoadYearIndex = loadYearIndex as jest.MockedFunction<typeof loadYearIndex>;
 const mockLoadVideoData = loadVideoData as jest.MockedFunction<typeof loadVideoData>;
-const mockLoadAllVideos = loadAllVideos as jest.MockedFunction<typeof loadAllVideos>;
 
 // Mock server instance
 const mockServer = {
@@ -117,15 +115,6 @@ describe('WWDC Tools Integration', () => {
       videoCount: 10,
       videos: ['videos/2025-10001.json'],
     } as any);
-
-    mockLoadAllVideos.mockResolvedValue([
-      {
-        id: '10001',
-        title: 'Test Video',
-        year: '2025',
-        topics: ['SwiftUI'],
-      },
-    ] as any);
   });
 
   describe('list_wwdc_videos', () => {

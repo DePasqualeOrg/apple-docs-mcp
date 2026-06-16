@@ -1,5 +1,9 @@
 /**
- * Simple logger utility for consistent logging across the application
+ * Simple logger utility for consistent logging across the application.
+ *
+ * This is an MCP stdio server: stdout carries the JSON-RPC protocol, so every
+ * log line must go to stderr. All levels use console.error/console.warn (both
+ * write to stderr); none may use console.log, which would corrupt the protocol.
  */
 
 export enum LogLevel {
@@ -16,25 +20,25 @@ class Logger {
   /**
    * Log debug message
    */
-  debug(message: string, ...args: any[]): void {
+  debug(message: string, ...args: unknown[]): void {
     if (this.enabled && this.shouldLog(LogLevel.DEBUG)) {
-      console.log(`[DEBUG] ${message}`, ...args);
+      console.error(`[DEBUG] ${message}`, ...args);
     }
   }
 
   /**
    * Log info message
    */
-  info(message: string, ...args: any[]): void {
+  info(message: string, ...args: unknown[]): void {
     if (this.enabled && this.shouldLog(LogLevel.INFO)) {
-      console.log(`[INFO] ${message}`, ...args);
+      console.error(`[INFO] ${message}`, ...args);
     }
   }
 
   /**
    * Log warning message
    */
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
     if (this.shouldLog(LogLevel.WARN)) {
       console.warn(`[WARN] ${message}`, ...args);
     }

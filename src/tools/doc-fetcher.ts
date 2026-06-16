@@ -1,8 +1,9 @@
 import { apiCache, generateEnhancedCacheKey } from '../utils/cache.js';
-import { convertToJsonApiUrl } from '../utils/url-converter.js';
+import { convertToJsonApiUrl, toAbsoluteAppleUrl } from '../utils/url-converter.js';
 import { httpClient } from '../utils/http-client.js';
-import type { AppleDocJSON } from '../types/apple-docs.js';
-import type { ContentSection, ContentItem } from '../types/content-sections.js';
+import { getErrorMessage } from '../utils/error-handler.js';
+import type { AppleDocJSON, PlatformInfo } from '../types/apple-docs.js';
+import type { ContentSection } from '../types/content-sections.js';
 import { logger } from '../utils/logger.js';
 import { PROCESSING_LIMITS } from '../utils/constants.js';
 import {
@@ -18,7 +19,7 @@ import {
 /**
  * Format JSON documentation content with enhanced analysis
  */
-function formatJsonDocumentation(
+export function formatJsonDocumentation(
   jsonData: AppleDocJSON,
   originalUrl: string,
   options: EnhancedAnalysisOptions = {},
@@ -34,12 +35,20 @@ function formatJsonDocumentation(
   // Check if this is a specific API/symbol or an API collection
   if (isSpecificAPIDocument(jsonData)) {
     content += formatSpecificAPIContent(jsonData);
+    // Symbol pages (enums, option sets, structs, classes) keep their members —
+    // enum cases, nested types — in topicSections. formatSpecificAPIContent only
+    // renders the declaration and prose, so without this the member list is
+    // dropped entirely (e.g. an enum page would show no cases).
+    content += formatTopicSections(jsonData);
   } else {
     content += formatAPICollectionContent(jsonData);
   }
 
-  // Add platform availability
-  content += formatPlatformAvailability(jsonData);
+  // Add platform availability. When the caller also requests the richer platform
+  // analysis section below, skip this one so the platform list isn't shown twice.
+  if (!options.includePlatformAnalysis) {
+    content += formatPlatformAvailability(jsonData);
+  }
 
   // Add See Also section
   content += formatSeeAlsoSection(jsonData);
@@ -123,19 +132,18 @@ function formatSpecificAPIContent(jsonData: AppleDocJSON): string {
 
         case 'content':
           if (typedSection.content && Array.isArray(typedSection.content)) {
-            typedSection.content.forEach((item) => {
-              const contentItem = item as ContentItem;
+            typedSection.content.forEach((contentItem) => {
               if (contentItem.type === 'heading') {
                 content += `## ${contentItem.text}\n\n`;
               } else if (contentItem.type === 'paragraph' && contentItem.inlineContent) {
                 const paragraphText = contentItem.inlineContent
-                  .map((inline: any) => {
+                  .map((inline) => {
                     if (inline.type === 'text') {
                       return inline.text ?? '';
                     } else if (inline.type === 'codeVoice') {
-                      return `\`${(inline).code ?? ''}\``;
-                    } else if (inline.type === 'reference' && (inline).identifier) {
-                      const apiName = ((inline).identifier as string).split('/').pop() ?? (inline).identifier;
+                      return `\`${inline.code ?? ''}\``;
+                    } else if (inline.type === 'reference' && inline.identifier) {
+                      const apiName = inline.identifier.split('/').pop() ?? inline.identifier;
                       return `\`${apiName}\``;
                     }
                     return '';
@@ -144,8 +152,8 @@ function formatSpecificAPIContent(jsonData: AppleDocJSON): string {
                 if (paragraphText.trim()) {
                   content += `${paragraphText}\n\n`;
                 }
-              } else if (contentItem.type === 'codeListing' && (contentItem as any).code) {
-                content += `\`\`\`${(contentItem as any).syntax ?? 'swift'}\n${(contentItem as any).code.join('\n')}\`\`\`\n\n`;
+              } else if (contentItem.type === 'codeListing' && contentItem.code) {
+                content += `\`\`\`${contentItem.syntax ?? 'swift'}\n${contentItem.code.join('\n')}\`\`\`\n\n`;
               }
             });
           }
@@ -169,10 +177,10 @@ function formatAPICollectionContent(jsonData: AppleDocJSON): string {
     jsonData.primaryContentSections.forEach((section) => {
       const typedSection = section as ContentSection;
       if (typedSection.kind === 'content' && typedSection.content) {
-        typedSection.content.forEach((item: any) => {
+        typedSection.content.forEach((item) => {
           if (item.type === 'paragraph' && item.inlineContent) {
             const paragraphText = item.inlineContent
-              .map((inline: any) => {
+              .map((inline) => {
                 if (inline.type === 'text') {
                   return inline.text ?? '';
                 } else if (inline.type === 'reference' && inline.identifier) {
@@ -187,10 +195,10 @@ function formatAPICollectionContent(jsonData: AppleDocJSON): string {
               content += `${paragraphText}\n\n`;
             }
           } else if (item.type === 'unorderedList' && item.items) {
-            item.items.forEach((listItem: any) => {
+            item.items.forEach((listItem) => {
               if (listItem.content?.[0]?.inlineContent) {
                 const listText = listItem.content[0].inlineContent
-                  .map((inline: any) => {
+                  .map((inline) => {
                     if (inline.type === 'text') {
                       return inline.text ?? '';
                     } else if (inline.type === 'reference' && inline.identifier) {
@@ -212,26 +220,51 @@ function formatAPICollectionContent(jsonData: AppleDocJSON): string {
     });
   }
 
-  // Add topic sections (API Collections) - this is the most important part
-  if (jsonData.topicSections && Array.isArray(jsonData.topicSections)) {
-    content += '## APIs and Functions\n\n';
+  // Add topic sections (API collections, enum cases, member lists)
+  content += formatTopicSections(jsonData);
 
-    jsonData.topicSections.forEach((section) => {
-      if (section.title && section.identifiers && Array.isArray(section.identifiers)) {
-        content += `### ${section.title}\n\n`;
+  return content;
+}
 
-        section.identifiers.forEach((identifier: string) => {
-          // Extract the API name from the identifier
-          const apiName = identifier.split('/').pop() ?? identifier;
-          // Create a documentation URL for the API
-          const apiPath = identifier.replace('doc://com.apple.SwiftUI/documentation/', '');
-          const apiUrl = `https://developer.apple.com/documentation/${apiPath}`;
-          content += `- [\`${apiName}\`](${apiUrl})\n`;
-        });
-        content += '\n';
-      }
-    });
+/**
+ * Convert a documentation reference identifier into an absolute
+ * developer.apple.com URL. Prefers the reference's own `url` from the page's
+ * references map (correct for any framework); falls back to a generic parse of
+ * the `doc://<bundle>/documentation/<path>` identifier. The previous inline
+ * logic hard-coded `doc://com.apple.SwiftUI/`, producing broken links for every
+ * other framework.
+ */
+function identifierToDocUrl(identifier: string, jsonData: AppleDocJSON): string {
+  const ref = jsonData.references?.[identifier];
+  const apiPath = identifier.replace(/^doc:\/\/[^/]+\/documentation\//, '');
+  return toAbsoluteAppleUrl(ref?.url, `https://developer.apple.com/documentation/${apiPath}`);
+}
+
+/**
+ * Render a page's topicSections (member lists, enum cases, grouped APIs) as
+ * markdown. Used for both API collection pages and specific symbol pages whose
+ * members live in topicSections (enums, option sets, structs, classes).
+ */
+function formatTopicSections(jsonData: AppleDocJSON): string {
+  if (!jsonData.topicSections || !Array.isArray(jsonData.topicSections)) {
+    return '';
   }
+
+  let content = '## Topics\n\n';
+
+  jsonData.topicSections.forEach((section) => {
+    if (section.title && section.identifiers && Array.isArray(section.identifiers)) {
+      content += `### ${section.title}\n\n`;
+
+      section.identifiers.forEach((identifier: string) => {
+        const ref = jsonData.references?.[identifier];
+        const apiName = ref?.title ?? identifier.split('/').pop() ?? identifier;
+        const apiUrl = identifierToDocUrl(identifier, jsonData);
+        content += `- [\`${apiName}\`](${apiUrl})\n`;
+      });
+      content += '\n';
+    }
+  });
 
   return content;
 }
@@ -247,6 +280,11 @@ interface EnhancedAnalysisOptions {
 }
 
 /**
+ * The MCP response shape this fetcher produces (and caches).
+ */
+type DocFetchResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+/**
  * Fetch JSON documentation from Apple Developer Documentation with optional enhanced analysis
  * @param url The URL of the documentation page
  * @param options Enhanced analysis options
@@ -255,17 +293,20 @@ interface EnhancedAnalysisOptions {
  */
 export async function fetchAppleDocJson(
   url: string,
-  options: EnhancedAnalysisOptions | number = {},
+  options: EnhancedAnalysisOptions = {},
   maxDepth: number = 2,
-): Promise<any> {
-  // Backward compatibility: if second param is number, treat as maxDepth
-  if (typeof options === 'number') {
-    maxDepth = options;
-    options = {};
-  }
+): Promise<DocFetchResult> {
   try {
-    // Validate that this is an Apple Developer URL
-    if (!url.includes('developer.apple.com')) {
+    // Validate that this is an Apple Developer URL by hostname (not a substring
+    // match, which a URL like https://evil.example/developer.apple.com/x.json
+    // would slip through). The HTTP client enforces an allowlist too.
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      throw new Error('URL must be from developer.apple.com');
+    }
+    if (hostname !== 'developer.apple.com') {
       throw new Error('URL must be from developer.apple.com');
     }
 
@@ -277,10 +318,10 @@ export async function fetchAppleDocJson(
     }
 
     // Generate cache key including options
-    const cacheKey = generateEnhancedCacheKey(jsonApiUrl, options as any);
+    const cacheKey = generateEnhancedCacheKey(jsonApiUrl, options);
 
     // Try to get from cache first
-    const cachedResult = apiCache.get(cacheKey);
+    const cachedResult = apiCache.get<DocFetchResult>(cacheKey);
     if (cachedResult) {
       logger.debug(`Cache hit for: ${jsonApiUrl}`);
       return cachedResult;
@@ -298,7 +339,9 @@ export async function fetchAppleDocJson(
       Object.keys(jsonData.references).length > 0 &&
       maxDepth > 0) {
 
-      // Find the main reference to follow (usually first in the list)
+      // Follow the first reference as a heuristic. Apple's references map has no
+      // documented ordering, but reference-only pages list the canonical target
+      // first in practice.
       const mainReferenceKey = Object.keys(jsonData.references)[0];
       const mainReference = jsonData.references[mainReferenceKey];
 
@@ -312,7 +355,14 @@ export async function fetchAppleDocJson(
           refPath = refPath.substring(1);
         }
         const refUrl = `https://developer.apple.com/tutorials/data/documentation/${refPath}.json`;
-        return await fetchAppleDocJson(refUrl, options, maxDepth - 1);
+        const result = await fetchAppleDocJson(refUrl, options, maxDepth - 1);
+        // Cache the resolved content under the original URL's key too, so a
+        // reference-only collection page doesn't re-fetch both levels on the
+        // next request. Errors aren't cached, matching the non-recursive path.
+        if (!result.isError) {
+          apiCache.set(cacheKey, result);
+        }
+        return result;
       }
     }
 
@@ -324,16 +374,7 @@ export async function fetchAppleDocJson(
 
     return result;
   } catch (error) {
-    let errorMessage: string;
-
-    // Handle AppError objects from http-client
-    if (error && typeof error === 'object' && 'message' in error) {
-      errorMessage = (error as any).message;
-    } else if (error instanceof Error) {
-      errorMessage = error.message;
-    } else {
-      errorMessage = String(error);
-    }
+    const errorMessage = getErrorMessage(error);
 
     logger.error('Error fetching Apple doc JSON:', errorMessage);
 
@@ -364,7 +405,7 @@ function extractRelatedApis(jsonData: AppleDocJSON): Array<{title: string, url: 
             const ref = jsonData.references[identifier];
             relatedApis.push({
               title: ref.title ?? 'Unknown',
-              url: ref.url ? (ref.url.startsWith('http') ? ref.url : `https://developer.apple.com${ref.url}`) : '#',
+              url: toAbsoluteAppleUrl(ref.url),
               relationship: section.title ?? 'Related',
             });
           }
@@ -382,7 +423,7 @@ function extractRelatedApis(jsonData: AppleDocJSON): Array<{title: string, url: 
             const ref = jsonData.references[identifier];
             relatedApis.push({
               title: ref.title ?? 'Unknown',
-              url: ref.url ? (ref.url.startsWith('http') ? ref.url : `https://developer.apple.com${ref.url}`) : '#',
+              url: toAbsoluteAppleUrl(ref.url),
               relationship: `See Also: ${section.title ?? 'Related'}`,
             });
           }
@@ -406,7 +447,7 @@ function extractReferences(jsonData: AppleDocJSON): Array<{title: string, url: s
     for (const [, ref] of refEntries) {
       references.push({
         title: ref.title ?? 'Unknown',
-        url: ref.url ? (ref.url.startsWith('http') ? ref.url : `https://developer.apple.com${ref.url}`) : '#',
+        url: toAbsoluteAppleUrl(ref.url),
         type: ref.role ?? ref.kind ?? 'unknown',
         abstract: ref.abstract
           ? ref.abstract.map((a) => (a as { text?: string })?.text ?? '').join(' ').trim()
@@ -433,7 +474,7 @@ function extractSimilarApis(jsonData: AppleDocJSON): Array<{title: string, url: 
             const ref = jsonData.references[identifier];
             similarApis.push({
               title: ref.title ?? 'Unknown',
-              url: ref.url ? (ref.url.startsWith('http') ? ref.url : `https://developer.apple.com${ref.url}`) : '#',
+              url: toAbsoluteAppleUrl(ref.url),
               category: section.title ?? 'Related',
             });
           }
@@ -455,7 +496,7 @@ function analyzePlatformCompatibility(
   betaPlatforms: string[];
   deprecatedPlatforms: string[];
   crossPlatform: boolean;
-  platforms: any[];
+  platforms: PlatformInfo[];
 } | null {
   if (!jsonData.metadata?.platforms) {
     return null;
@@ -555,7 +596,7 @@ function formatPlatformAnalysisSection(
     betaPlatforms: string[];
     deprecatedPlatforms: string[];
     crossPlatform?: boolean;
-    platforms?: any[];
+    platforms?: PlatformInfo[];
   },
 ): string {
   let content = '\n## Platform Compatibility Analysis\n\n';

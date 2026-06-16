@@ -2,7 +2,8 @@
  * Document formatting utilities
  */
 
-import type { AppleDocJSON } from '../types/apple-docs.js';
+import type { AppleDocJSON, PlatformInfo } from '../types/apple-docs.js';
+import { toAbsoluteAppleUrl } from '../utils/url-converter.js';
 
 /**
  * Format document header with title and status
@@ -76,7 +77,7 @@ export function formatPlatformAvailability(jsonData: AppleDocJSON): string {
 /**
  * Format a single platform line
  */
-function formatPlatformLine(platform: any): string {
+function formatPlatformLine(platform: PlatformInfo): string {
   const platformStatus = [];
 
   if (platform.beta) {
@@ -117,7 +118,7 @@ export function formatSeeAlsoSection(jsonData: AppleDocJSON): string {
   jsonData.seeAlsoSections.forEach((seeAlso) => {
     if (seeAlso.title && seeAlso.identifiers) {
       content += `### ${seeAlso.title}\n\n`;
-      content += formatSeeAlsoIdentifiers(seeAlso.identifiers);
+      content += formatSeeAlsoIdentifiers(seeAlso.identifiers, jsonData.references);
     }
   });
 
@@ -125,15 +126,25 @@ export function formatSeeAlsoSection(jsonData: AppleDocJSON): string {
 }
 
 /**
- * Format See Also identifiers
+ * Format See Also identifiers. Prefers each reference's own `url` from the page's
+ * references map (correct for any framework); falls back to stripping the
+ * `doc://<bundle>/documentation/` prefix generically. The previous code
+ * hard-coded `doc://com.apple.SwiftUI/`, producing broken links (containing a
+ * literal `documentation/doc://`) for every other framework.
  */
-function formatSeeAlsoIdentifiers(identifiers: string[]): string {
+function formatSeeAlsoIdentifiers(
+  identifiers: string[],
+  references?: AppleDocJSON['references'],
+): string {
   let content = '';
 
   identifiers.forEach((identifier: string) => {
-    const apiName = identifier.split('/').pop() ?? identifier;
-    const apiPath = identifier.replace('doc://com.apple.SwiftUI/documentation/', '');
-    const apiUrl = `https://developer.apple.com/documentation/${apiPath}`;
+    const ref = references?.[identifier];
+    const apiName = ref?.title ?? identifier.split('/').pop() ?? identifier;
+    const apiUrl = toAbsoluteAppleUrl(
+      ref?.url,
+      `https://developer.apple.com/documentation/${identifier.replace(/^doc:\/\/[^/]+\/documentation\//, '')}`,
+    );
     content += `- [\`${apiName}\`](${apiUrl})\n`;
   });
 

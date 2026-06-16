@@ -165,33 +165,8 @@ describe('get-technology-overviews', () => {
     expect(result).not.toContain('Data management');
   });
 
-  it('should filter by platform', async () => {
-    // Add iOS-specific item to mock data
-    const mockWithPlatform = { ...mockOverviewsIndex };
-    mockWithPlatform.interfaceLanguages.swift[0].children.push({
-      path: '/documentation/technologyoverviews/ios-fundamentals',
-      title: 'iOS Fundamentals',
-      type: 'article',
-    });
-
-    (httpClient.getJson as jest.Mock).mockImplementation((url: unknown) => {
-      const urlStr = url as string;
-      if (urlStr.includes('TechnologyOverviews.json')) {
-        return Promise.resolve(mockOverviewsData);
-      }
-      if (urlStr.includes('index/technologyoverviews')) {
-        return Promise.resolve(mockWithPlatform);
-      }
-      throw new Error('Unknown URL');
-    });
-
-    const result = await handleGetTechnologyOverviews(undefined, 'ios');
-
-    expect(result).toContain('iOS Fundamentals');
-  });
-
   it('should search by query', async () => {
-    const result = await handleGetTechnologyOverviews(undefined, 'all', 'machine learning');
+    const result = await handleGetTechnologyOverviews(undefined, 'machine learning');
 
     expect(result).toContain('AI & Machine Learning');
     expect(result).not.toContain('App design and UI');
@@ -199,7 +174,7 @@ describe('get-technology-overviews', () => {
   });
 
   it('should respect includeSubcategories flag', async () => {
-    const result = await handleGetTechnologyOverviews('app-design-and-ui', 'all', undefined, false);
+    const result = await handleGetTechnologyOverviews('app-design-and-ui', undefined, false);
 
     expect(result).toContain('App design and UI');
     // Should not include nested items when includeSubcategories is false
@@ -208,7 +183,7 @@ describe('get-technology-overviews', () => {
   });
 
   it('should limit results', async () => {
-    const result = await handleGetTechnologyOverviews(undefined, 'all', undefined, true, 2);
+    const result = await handleGetTechnologyOverviews(undefined, undefined, true, 2);
 
     // Should limit top-level items to 2
     // Count top-level items (those with "### [" at the start of line)

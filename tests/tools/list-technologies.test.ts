@@ -102,6 +102,39 @@ describe('list-technologies', () => {
       expect(result).toContain('[Foundation]');
     });
 
+    it('should match a slug-form category against the display name', async () => {
+      mockHttpClient.getJson.mockResolvedValue(mockTechnologiesResponse);
+
+      const result = await handleListTechnologies('app-frameworks');
+
+      expect(result).toContain('## App Frameworks');
+      expect(result).toContain('[Foundation]');
+      expect(result).not.toContain('## Featured');
+    });
+
+    it('should normalize "&" and slugs so "graphics-and-games" matches "Graphics & Games"', async () => {
+      mockHttpClient.getJson.mockResolvedValue({
+        sections: [{
+          kind: 'technologies',
+          groups: [{
+            name: 'Graphics & Games',
+            technologies: [{
+              title: 'Metal',
+              identifier: 'metal',
+              tags: [],
+              languages: ['swift'],
+              destination: { identifier: 'doc://com.apple.documentation/documentation/metal' },
+            }],
+          }],
+        }],
+      });
+
+      const result = await handleListTechnologies('graphics-and-games');
+
+      expect(result).toContain('## Graphics & Games');
+      expect(result).toContain('[Metal]');
+    });
+
     it('should filter by language', async () => {
       const mockResponseWithLanguage = {
         sections: [

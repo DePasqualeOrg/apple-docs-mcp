@@ -20,7 +20,7 @@ Apple Developer Documentation MCP Server - Access Apple's official developer doc
 - 🔗 **Related APIs Discovery**: Find SwiftUI views, UIKit controllers, and framework-specific API relationships
 - 📊 **Platform Compatibility**: iOS 13+, macOS 10.15+, watchOS 6+, tvOS 13+, visionOS compatibility analysis
 - ⚡ **High Performance**: Optimized for Xcode, Swift Playgrounds, and AI-powered development environments
-- 🔄 **Smart UserAgent Pool**: Intelligent UserAgent rotation system with automatic failure recovery and performance monitoring
+- 🔄 **Resilient Networking**: Concurrency limiting, retry with exponential backoff, and 429/Retry-After handling
 - 🌐 **Multi-Platform**: Complete iOS, iPadOS, macOS, watchOS, tvOS, and visionOS documentation support
 - 🏷️ **Beta & Status Tracking**: iOS 26 beta APIs, deprecated UIKit methods, new SwiftUI features tracking
 
@@ -407,9 +407,7 @@ apple-docs-mcp/
 │       ├── cache.ts                  # Memory cache with TTL support
 │       ├── constants.ts              # Application constants and URLs
 │       ├── error-handler.ts          # Error handling and validation
-│       ├── http-client.ts            # HTTP client with performance tracking
-│       ├── user-agent-pool.ts        # Smart UserAgent rotation system
-│       ├── http-headers-generator.ts # Dynamic browser headers generation
+│       ├── http-client.ts            # HTTP client (retry, rate limiting, stats)
 │       └── url-converter.ts          # URL conversion utilities
 ├── 📦 dist/                          # Compiled JavaScript
 ├── 📄 package.json                   # Package configuration
@@ -419,8 +417,7 @@ apple-docs-mcp/
 ### 🚀 Performance Features
 
 - **Memory-Based Caching**: Custom cache implementation with automatic cleanup and TTL support
-- **Smart UserAgent Pool**: Intelligent rotation system with automatic failure recovery and performance monitoring
-- **Dynamic Headers**: Realistic browser headers generation (Accept, Accept-Language, User-Agent)
+- **Resilient HTTP**: Concurrency limiting, exponential backoff, and 429/Retry-After handling
 - **Smart Search**: Official Apple search API with enhanced result formatting
 - **Enhanced Analysis**: Optional related APIs, platform compatibility, and similarity analysis
 - **Error Resilience**: Graceful degradation with comprehensive error handling
@@ -453,51 +450,6 @@ The package includes:
 - 💾 **35MB of optimized JSON data**
 
 > **Note**: Keep your package updated to get the latest WWDC content additions.
-
-## ⚙️ Configuration
-
-### 🔄 UserAgent Pool Configuration
-
-The MCP server includes an intelligent UserAgent rotation system to improve API reliability:
-
-#### Environment Variables
-
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `USER_AGENT_ROTATION_ENABLED` | Enable/disable rotation | `true` | `true` |
-| `USER_AGENT_POOL_STRATEGY` | Rotation strategy | `random` | `smart` |
-| `USER_AGENT_MAX_RETRIES` | Max retry attempts | `3` | `5` |
-| `USER_AGENT_POOL_CONFIG` | Custom pool config (JSON) | Built-in agents | See below |
-
-#### Custom Pool Configuration
-
-```bash
-# Configure custom UserAgent pool
-export USER_AGENT_POOL_CONFIG='[
-  {"userAgent": "MyApp/1.0 (compatible)", "weight": 3, "maxUsageCount": 1000},
-  {"userAgent": "MyApp/2.0 (advanced)", "weight": 2, "maxUsageCount": 800}
-]'
-
-# Set rotation strategy (random/sequential/smart)
-export USER_AGENT_POOL_STRATEGY=smart
-
-# Enable debugging
-export NODE_ENV=development
-```
-
-#### Available Strategies
-
-- **`random`**: Fast random selection (best performance)
-- **`sequential`**: Round-robin rotation (predictable order)
-- **`smart`**: Success rate optimization (best reliability)
-
-#### Built-in UserAgents
-
-The server includes 12+ pre-configured UserAgent strings covering:
-- Chrome (Mac Intel/Apple Silicon, Windows, Linux)
-- Firefox (Mac Intel/Apple Silicon, Windows, Linux)
-- Safari (Mac Intel/Apple Silicon, latest versions)
-- Edge (Windows, Mac Intel/Apple Silicon)
 
 ## 🧪 Development
 

@@ -1,180 +1,128 @@
 /**
- * Tests for HTTP client functionality
+ * Hermetic tests for the HTTP client.
+ *
+ * These exercise the real `httpClient` with a mocked `fetch`, covering the
+ * behaviors that matter: the SSRF host allowlist, concurrency limiting, retry
+ * with backoff for 5xx, 429 + Retry-After handling, 404 as terminal, structured
+ * HttpError status, and timeout mapping. No real network access.
  */
 
-// Mock fetch
-const mockFetch = jest.fn();
-global.fetch = mockFetch as any;
+import { jest } from '@jest/globals';
+import { httpClient, HttpError } from '../../src/utils/http-client.js';
 
-describe('HTTP Client', () => {
-  beforeEach(() => {
-    mockFetch.mockClear();
+const ALLOWED_URL = 'https://developer.apple.com/tutorials/data/documentation/swiftui.json';
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+const realFetch = global.fetch;
+let fetchMock: jest.Mock;
+
+beforeEach(() => {
+  fetchMock = jest.fn();
+  (global as unknown as { fetch: unknown }).fetch = fetchMock;
+  httpClient.resetStats();
+});
+
+afterEach(() => {
+  (global as unknown as { fetch: unknown }).fetch = realFetch;
+});
+
+describe('httpClient SSRF guard', () => {
+  it('refuses a non-Apple host and never calls fetch', async () => {
+    await expect(
+      httpClient.get('https://evil.example/developer.apple.com/x.json'),
+    ).rejects.toThrow(/non-Apple host/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  describe('Mock HTTP Client', () => {
-    it('should handle successful requests', async () => {
-      const mockResponse = {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ success: true }),
-        text: () => Promise.resolve('success'),
-      };
-      
-      mockFetch.mockResolvedValueOnce(mockResponse);
+  it('allows the search API host', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ results: [] }));
+    await expect(
+      httpClient.postJson('https://devintserv.msc.sbz.apple.com/api/v1/search', { text: 'x' }),
+    ).resolves.toEqual({ results: [] });
+  });
+});
 
-      const response = await fetch('https://example.com/api');
-      const data = await response.json();
-      
-      expect(mockFetch).toHaveBeenCalledWith('https://example.com/api');
-      expect(data).toEqual({ success: true });
-    });
-
-    it('should handle failed requests', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      };
-      
-      mockFetch.mockResolvedValueOnce(mockResponse);
-
-      const response = await fetch('https://example.com/api');
-      
-      expect(response.ok).toBe(false);
-      expect(response.status).toBe(404);
-    });
-
-    it('should handle network errors', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('Network error'));
-
-      await expect(fetch('https://example.com/api')).rejects.toThrow('Network error');
-    });
+describe('httpClient success + JSON', () => {
+  it('returns parsed JSON on 200', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+    await expect(httpClient.getJson(ALLOWED_URL)).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  describe('Performance Monitoring Concepts', () => {
-    it('should track request statistics', () => {
-      const stats = {
-        totalRequests: 0,
-        successfulRequests: 0,
-        failedRequests: 0,
-        totalResponseTime: 0,
-        averageResponseTime: 0,
-        successRate: 0,
-        requestsByStatus: {} as Record<number, number>,
-        requestsByDomain: {} as Record<string, number>,
-      };
+  it('sends a single static Safari User-Agent', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    await httpClient.getJson(ALLOWED_URL);
+    const headers = (fetchMock.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
+    expect(headers['User-Agent']).toMatch(/Safari/);
+  });
+});
 
-      // Simulate successful request
-      stats.totalRequests++;
-      stats.successfulRequests++;
-      stats.totalResponseTime += 100;
-      stats.averageResponseTime = stats.totalResponseTime / stats.totalRequests;
-      stats.successRate = (stats.successfulRequests / stats.totalRequests) * 100;
-      stats.requestsByStatus[200] = (stats.requestsByStatus[200] || 0) + 1;
-      stats.requestsByDomain['example.com'] = (stats.requestsByDomain['example.com'] || 0) + 1;
-
-      expect(stats.totalRequests).toBe(1);
-      expect(stats.successfulRequests).toBe(1);
-      expect(stats.successRate).toBe(100);
-      expect(stats.averageResponseTime).toBe(100);
-      expect(stats.requestsByStatus[200]).toBe(1);
-      expect(stats.requestsByDomain['example.com']).toBe(1);
-    });
-
-    it('should handle failed request statistics', () => {
-      const stats = {
-        totalRequests: 1,
-        successfulRequests: 0,
-        failedRequests: 1,
-        totalResponseTime: 50,
-        averageResponseTime: 50,
-        successRate: 0,
-        requestsByStatus: { 404: 1 } as Record<number, number>,
-        requestsByDomain: { 'example.com': 1 } as Record<string, number>,
-      };
-
-      expect(stats.totalRequests).toBe(1);
-      expect(stats.failedRequests).toBe(1);
-      expect(stats.successRate).toBe(0);
-      expect(stats.requestsByStatus[404]).toBe(1);
-    });
-
-    it('should generate performance report format', () => {
-      const stats = {
-        totalRequests: 10,
-        successfulRequests: 9,
-        failedRequests: 1,
-        averageResponseTime: 150,
-        successRate: 90,
-        requestsByStatus: { 200: 9, 404: 1 },
-        requestsByDomain: { 'developer.apple.com': 10 },
-      };
-
-      const report = `# HTTP Client Performance Report
-
-## Overall Statistics
-
-- **Total Requests:** ${stats.totalRequests}
-- **Successful Requests:** ${stats.successfulRequests}
-- **Failed Requests:** ${stats.failedRequests}
-- **Success Rate:** ${stats.successRate.toFixed(2)}%
-- **Average Response Time:** ${stats.averageResponseTime.toFixed(0)}ms
-
-## Performance Insights
-
-${stats.successRate >= 95 ? '✅ **Excellent reliability**' : 
-  stats.successRate >= 90 ? '⚠️ **Good reliability**' : 
-  '❌ **Poor reliability**'} - Success rate ${stats.successRate >= 90 ? 'above' : 'below'} 90%
-
-${stats.averageResponseTime < 1000 ? '✅ **Fast response times**' : 
-  stats.averageResponseTime < 3000 ? '⚠️ **Moderate response times**' : 
-  '❌ **Slow response times**'} - Average ${stats.averageResponseTime < 1000 ? 'under 1 second' : 
-  stats.averageResponseTime < 3000 ? 'under 3 seconds' : 'over 3 seconds'}`;
-
-      expect(report).toContain('HTTP Client Performance Report');
-      expect(report).toContain('**Total Requests:** 10');
-      expect(report).toContain('**Success Rate:** 90.00%');
-      expect(report).toContain('Good reliability');
-    });
+describe('httpClient retry behavior', () => {
+  it('does not retry a 404 and throws a structured HttpError', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    await expect(httpClient.get(ALLOWED_URL, { retries: 3 })).rejects.toBeInstanceOf(HttpError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  describe('Concurrency Control Concepts', () => {
-    it('should manage request queue', () => {
-      const queue = {
-        activeRequests: 0,
-        queuedRequests: 0,
-        maxConcurrent: 5,
-      };
+  it('retries a 5xx then succeeds', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(httpClient.getJson(ALLOWED_URL, { retries: 1, retryDelay: 1 })).resolves.toEqual({
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 
-      // Simulate adding requests
-      for (let i = 0; i < 7; i++) {
-        if (queue.activeRequests < queue.maxConcurrent) {
-          queue.activeRequests++;
-        } else {
-          queue.queuedRequests++;
-        }
-      }
+  it('retries a 429 honoring Retry-After, then succeeds', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'retry-after': '0' } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(httpClient.getJson(ALLOWED_URL, { retries: 1, retryDelay: 1 })).resolves.toEqual({
+      ok: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 
-      expect(queue.activeRequests).toBe(5);
-      expect(queue.queuedRequests).toBe(2);
+  it('carries the HTTP status on the error', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    expect.assertions(2);
+    try {
+      await httpClient.get(ALLOWED_URL, { retries: 0 });
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).status).toBe(503);
+    }
+  });
+
+  it('maps a timeout to a clear message', async () => {
+    fetchMock.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+    await expect(httpClient.get(ALLOWED_URL, { retries: 0 })).rejects.toThrow(/timed out/i);
+  });
+});
+
+describe('httpClient concurrency limiting', () => {
+  it('never exceeds the configured concurrency cap', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    fetchMock.mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return jsonResponse({});
     });
 
-    it('should process queued requests', () => {
-      const queue = {
-        activeRequests: 5,
-        queuedRequests: 3,
-        maxConcurrent: 5,
-      };
+    await Promise.all(Array.from({ length: 12 }, () => httpClient.getJson(ALLOWED_URL)));
 
-      // Simulate completing a request
-      queue.activeRequests--;
-      if (queue.queuedRequests > 0) {
-        queue.queuedRequests--;
-        queue.activeRequests++;
-      }
-
-      expect(queue.activeRequests).toBe(5);
-      expect(queue.queuedRequests).toBe(2);
-    });
+    // REQUEST_CONFIG.MAX_CONCURRENT_REQUESTS is 5.
+    expect(peak).toBeLessThanOrEqual(5);
+    expect(peak).toBeGreaterThan(1);
   });
 });

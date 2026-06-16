@@ -140,7 +140,7 @@ export const FRAMEWORK_MAPPINGS: Record<string, string> = {
   'photokit': 'PhotoKit',
   'photo-kit': 'PhotoKit',
   'photo_kit': 'PhotoKit',
-  'photos': 'PhotoKit',
+  'photos': 'Photos',
   'photosui': 'PhotosUI',
   'photos-ui': 'PhotosUI',
   'photos_ui': 'PhotosUI',
@@ -386,35 +386,6 @@ export const FRAMEWORK_MAPPINGS: Record<string, string> = {
 } as const;
 
 /**
- * Alternative framework names and common aliases
- */
-export const FRAMEWORK_ALIASES: Record<string, string[]> = {
-  'SwiftUI': ['swiftui', 'swift-ui', 'swift_ui'],
-  'UIKit': ['uikit', 'ui-kit', 'ui_kit'],
-  'AppKit': ['appkit', 'app-kit', 'app_kit'],
-  'Core Data': ['coredata', 'core-data', 'core_data'],
-  'CloudKit': ['cloudkit', 'cloud-kit', 'cloud_kit'],
-  'Core Graphics': ['coregraphics', 'core-graphics', 'core_graphics', 'cg'],
-  'Core Image': ['coreimage', 'core-image', 'core_image', 'ci'],
-  'Core Animation': ['coreanimation', 'core-animation', 'core_animation', 'quartzcore'],
-  'AVFoundation': ['avfoundation', 'av-foundation', 'av_foundation'],
-  'Metal': ['metal'],
-  'Vision': ['vision'],
-  'Core ML': ['coreml', 'core-ml', 'core_ml'],
-  'ARKit': ['arkit', 'ar-kit', 'ar_kit'],
-  'RealityKit': ['realitykit', 'reality-kit', 'reality_kit'],
-  'SceneKit': ['scenekit', 'scene-kit', 'scene_kit'],
-  'SpriteKit': ['spritekit', 'sprite-kit', 'sprite_kit'],
-  'GameKit': ['gamekit', 'game-kit', 'game_kit'],
-  'HealthKit': ['healthkit', 'health-kit', 'health_kit'],
-  'HomeKit': ['homekit', 'home-kit', 'home_kit'],
-  'MapKit': ['mapkit', 'map-kit', 'map_kit'],
-  'StoreKit': ['storekit', 'store-kit', 'store_kit'],
-  'AlarmKit': ['alarmkit', 'alarm-kit', 'alarm_kit'],
-  'WebKit': ['webkit', 'web-kit', 'web_kit'],
-} as const;
-
-/**
  * Framework categories for organization
  */
 export const FRAMEWORK_CATEGORIES = {
@@ -465,35 +436,6 @@ export function normalizeFrameworkName(framework: string): string {
 }
 
 /**
- * Get all possible aliases for a framework
- *
- * @param framework - The canonical framework name
- * @returns Array of all known aliases for the framework
- */
-export function getFrameworkAliases(framework: string): string[] {
-  const canonical = normalizeFrameworkName(framework);
-  return FRAMEWORK_ALIASES[canonical] || [];
-}
-
-/**
- * Check if a framework name is valid (has a known mapping)
- *
- * @param framework - The framework name to check
- * @returns True if the framework is recognized
- */
-export function isValidFramework(framework: string): boolean {
-  if (!framework || typeof framework !== 'string') {
-    return false;
-  }
-
-  const normalized = framework.trim().toLowerCase();
-  return !!FRAMEWORK_MAPPINGS[normalized] ||
-         Object.values(FRAMEWORK_MAPPINGS).some(
-           canonical => canonical.toLowerCase() === normalized,
-         );
-}
-
-/**
  * Get frameworks by category
  *
  * @param category - The category name
@@ -501,78 +443,4 @@ export function isValidFramework(framework: string): boolean {
  */
 export function getFrameworksByCategory(category: keyof typeof FRAMEWORK_CATEGORIES): string[] {
   return [...(FRAMEWORK_CATEGORIES[category] || [])];
-}
-
-/**
- * Find the category of a framework
- *
- * @param framework - The framework name
- * @returns The category name or null if not found
- */
-export function getFrameworkCategory(framework: string): keyof typeof FRAMEWORK_CATEGORIES | null {
-  const canonical = normalizeFrameworkName(framework);
-
-  for (const [category, frameworks] of Object.entries(FRAMEWORK_CATEGORIES)) {
-    if ((frameworks as readonly string[]).includes(canonical)) {
-      return category as keyof typeof FRAMEWORK_CATEGORIES;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Search for frameworks by partial name or description
- *
- * @param query - The search query
- * @returns Array of matching framework names
- */
-export function searchFrameworks(query: string): string[] {
-  if (!query || typeof query !== 'string') {
-    return [];
-  }
-
-  const searchTerm = query.trim().toLowerCase();
-  const matches = new Set<string>();
-
-  // Search in canonical names
-  Object.values(FRAMEWORK_MAPPINGS).forEach(canonical => {
-    if (canonical.toLowerCase().includes(searchTerm)) {
-      matches.add(canonical);
-    }
-  });
-
-  // Search in aliases
-  Object.entries(FRAMEWORK_MAPPINGS).forEach(([alias, canonical]) => {
-    if (alias.includes(searchTerm)) {
-      matches.add(canonical);
-    }
-  });
-
-  return Array.from(matches).sort();
-}
-
-/**
- * Get comprehensive framework information
- *
- * @param framework - The framework name
- * @returns Object with framework details
- */
-export function getFrameworkInfo(framework: string): {
-  canonical: string;
-  aliases: string[];
-  category: string | null;
-  isValid: boolean;
-} {
-  const canonical = normalizeFrameworkName(framework);
-  const aliases = getFrameworkAliases(canonical);
-  const category = getFrameworkCategory(canonical);
-  const isValid = isValidFramework(framework);
-
-  return {
-    canonical,
-    aliases,
-    category,
-    isValid,
-  };
 }

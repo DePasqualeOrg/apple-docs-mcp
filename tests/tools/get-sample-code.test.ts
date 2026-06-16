@@ -119,9 +119,10 @@ describe('handleGetSampleCode', () => {
     jest.resetModules();
     jest.clearAllMocks();
 
-    // Setup HTTP client mock
+    // Setup HTTP client mock. handleGetSampleCode uses getJson, which returns
+    // already-parsed JSON (and throws on transport/non-2xx/parse failures).
     mockHttpClient = {
-      get: jest.fn(),
+      getJson: jest.fn(),
     };
     jest.doMock('../../src/utils/http-client', () => ({
       httpClient: mockHttpClient,
@@ -143,24 +144,18 @@ describe('handleGetSampleCode', () => {
 
   it('should fetch and return sample code data', async () => {
     // Mock HTTP responses
-    mockHttpClient.get
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeContent),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeIndex),
-      });
+    mockHttpClient.getJson
+      .mockResolvedValueOnce(mockSampleCodeContent)
+      .mockResolvedValueOnce(mockSampleCodeIndex);
 
     // Re-import to get mocked version
     const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
     const result = await handleGetSampleCode();
 
     // Verify API calls
-    expect(mockHttpClient.get).toHaveBeenCalledTimes(2);
-    expect(mockHttpClient.get).toHaveBeenCalledWith(APPLE_URLS.SAMPLE_CODE_JSON);
-    expect(mockHttpClient.get).toHaveBeenCalledWith(APPLE_URLS.SAMPLE_CODE_INDEX_JSON);
+    expect(mockHttpClient.getJson).toHaveBeenCalledTimes(2);
+    expect(mockHttpClient.getJson).toHaveBeenCalledWith(APPLE_URLS.SAMPLE_CODE_JSON);
+    expect(mockHttpClient.getJson).toHaveBeenCalledWith(APPLE_URLS.SAMPLE_CODE_INDEX_JSON);
 
     // Verify result contains expected content
     expect(result).toContain('Apple Sample Code Library');
@@ -175,15 +170,9 @@ describe('handleGetSampleCode', () => {
   });
 
   it('should filter by framework', async () => {
-    mockHttpClient.get
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeContent),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeIndex),
-      });
+    mockHttpClient.getJson
+      .mockResolvedValueOnce(mockSampleCodeContent)
+      .mockResolvedValueOnce(mockSampleCodeIndex);
 
     const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
     const result = await handleGetSampleCode('SwiftUI');
@@ -202,15 +191,9 @@ describe('handleGetSampleCode', () => {
   });
 
   it('should filter beta samples when beta=exclude', async () => {
-    mockHttpClient.get
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeContent),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeIndex),
-      });
+    mockHttpClient.getJson
+      .mockResolvedValueOnce(mockSampleCodeContent)
+      .mockResolvedValueOnce(mockSampleCodeIndex);
 
     const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
     const result = await handleGetSampleCode(undefined, 'exclude');
@@ -231,19 +214,13 @@ describe('handleGetSampleCode', () => {
     const result = await handleGetSampleCode();
 
     expect(result).toBe(cachedResult);
-    expect(mockHttpClient.get).not.toHaveBeenCalled();
+    expect(mockHttpClient.getJson).not.toHaveBeenCalled();
   });
 
   it('should cache results after fetching', async () => {
-    mockHttpClient.get
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeContent),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: jest.fn().mockResolvedValue(mockSampleCodeIndex),
-      });
+    mockHttpClient.getJson
+      .mockResolvedValueOnce(mockSampleCodeContent)
+      .mockResolvedValueOnce(mockSampleCodeIndex);
 
     const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
     await handleGetSampleCode('SwiftUI', 'exclude', 'test', 10);
@@ -257,20 +234,13 @@ describe('handleGetSampleCode', () => {
     });
   });
 
-  it('should handle API errors gracefully', async () => {
-    mockHttpClient.get.mockRejectedValueOnce(new Error('Network error'));
+  it('should propagate fetch errors from the HTTP client', async () => {
+    // getJson throws on transport failures and non-2xx responses (the HTTP
+    // client wraps both in a typed AppError); handleGetSampleCode lets that
+    // propagate to the tool dispatcher rather than handling status codes itself.
+    mockHttpClient.getJson.mockRejectedValueOnce(new Error('Network error'));
 
     const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
     await expect(handleGetSampleCode()).rejects.toThrow('Network error');
-  });
-
-  it('should handle non-200 status codes', async () => {
-    mockHttpClient.get.mockResolvedValueOnce({
-      ok: false,
-      statusText: 'Not Found',
-    });
-
-    const { handleGetSampleCode } = await import('../../src/tools/get-sample-code');
-    await expect(handleGetSampleCode()).rejects.toThrow('Failed to fetch sample code content: Not Found');
   });
 });

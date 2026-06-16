@@ -1,313 +1,102 @@
 import { jest } from '@jest/globals';
-import { parseSearchResults } from '../../src/tools/search-parser.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { mapSearchResults, type AppleSearchResponse } from '../../src/tools/search-result-parser.js';
+import { formatSearchResults, fetchAppleDocsSearch } from '../../src/tools/search-parser.js';
+import { httpClient } from '../../src/utils/http-client.js';
 
-// Mock the cache to prevent interference between tests
-jest.mock('../../src/utils/cache.js', () => ({
-  searchCache: {
-    get: jest.fn().mockReturnValue(null),
-    set: jest.fn(),
-  },
-  generateUrlCacheKey: jest.fn((url, params) => `${url}-${params.query}`),
-}));
+// Real Apple search API response (query "swiftui animations"): 34 documentation
+// entries + 44 developer entries. Used to verify mapping, filtering, and dedup.
+const fixture = JSON.parse(
+  readFileSync(join(__dirname, '../fixtures/apple-search.json'), 'utf8'),
+) as AppleSearchResponse;
 
-describe('parseSearchResults', () => {
-  const mockSearchUrl = 'https://developer.apple.com/search/?q=test';
+const KNOWN_TYPES = ['documentation', 'documentation-article', 'sample-code'];
 
-  describe('successful parsing', () => {
-    it('should parse search results from HTML', () => {
-      // Note: Apple Developer search uses DOM structure, not JavaScript objects
-      // This test reflects the actual HTML structure found on developer.apple.com/search
-      const html = `
-        <html>
-          <body>
-            <ul class="search-results">
-              <li class="search-result documentation">
-                <article>
-                  <h3 class="result-title">
-                    <a href="/documentation/uikit/uiview">UIView</a>
-                  </h3>
-                  <p class="result-description">
-                    An object that manages the content for a rectangular area on the screen.
-                  </p>
-                </article>
-              </li>
-              <li class="search-result documentation">
-                <article>
-                  <h3 class="result-title">
-                    <a href="/documentation/uikit/uiviewcontroller">UIViewController</a>
-                  </h3>
-                  <p class="result-description">
-                    An object that manages a view hierarchy for your UIKit app.
-                  </p>
-                </article>
-              </li>
-            </ul>
-          </body>
-        </html>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-
-      expect(result.content[0].text).toContain('# Apple Documentation Search Results');
-      expect(result.content[0].text).toContain('**Query:** "test"');
-      expect(result.content[0].text).toContain('### 1. UIView');
-      expect(result.content[0].text).toContain('### 2. UIViewController');
-      expect(result.content[0].text).toContain('An object that manages the content');
-      expect(result.content[0].text).toContain('**Framework:** Uikit');
-    });
-
-    it('should handle different result types', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result general">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/guide">Getting Started</a>
-              </h3>
-              <p class="result-description">A guide to get started.</p>
-            </article>
-          </li>
-          <li class="search-result sample">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/sample">Sample Code</a>
-              </h3>
-              <p class="result-description">Sample code project.</p>
-            </article>
-          </li>
-          <li class="search-result video">
-            <article>
-              <h3 class="result-title">
-                <a href="/videos/play/wwdc2023/10001">WWDC Video</a>
-              </h3>
-              <p class="result-description">WWDC session video.</p>
-            </article>
-          </li>
-        </ul>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
-
-      // Since general and video types are filtered out, we should get no results
-      expect(text).toContain('No results found');
-    });
-
-    it('should handle empty results', () => {
-      const html = `
-        <ul class="search-results">
-          <!-- No results -->
-        </ul>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-
-      expect(result.content[0].text).toContain('No results found for "test"');
-      expect(result.content[0].text).toContain('### Suggestions:');
-    });
-
-    it('should extract module names from URLs', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/swiftui/list">List</a>
-              </h3>
-              <p class="result-description">A container that presents rows of data.</p>
-            </article>
-          </li>
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/foundation/nsstring">NSString</a>
-              </h3>
-              <p class="result-description">A string object.</p>
-            </article>
-          </li>
-        </ul>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
-
-      expect(text).toContain('**Framework:** Swiftui');
-      expect(text).toContain('**Framework:** Foundation');
-    });
-
-    it('should limit results when too many', () => {
-      const manyResultsHtml = Array.from({ length: 100 }, (_, i) => `
-        <li class="search-result documentation">
-          <article>
-            <h3 class="result-title">
-              <a href="/documentation/test/result${i}">Result ${i}</a>
-            </h3>
-            <p class="result-description">Description ${i}</p>
-          </article>
-        </li>
-      `).join('');
-
-      const html = `
-        <ul class="search-results">
-          ${manyResultsHtml}
-        </ul>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
-
-      // Should show limited results
-      expect(text).toContain('### 1. Result 0');
-      expect(text).toContain('### 50. Result 49');
-      expect(text).not.toContain('Result 99');
-      expect(text).toContain('[View all results on Apple Developer]');
-    });
+describe('mapSearchResults', () => {
+  it('maps documentation entries and drops the developer category', () => {
+    const results = mapSearchResults(fixture, 'all');
+    expect(results.length).toBeGreaterThan(0);
+    // The fixture has 44 `developer` entries (parallel-array shape, no
+    // `documentation.metadata`); none should appear.
+    expect(results.every((r) => KNOWN_TYPES.includes(r.type))).toBe(true);
+    const first = results[0];
+    expect(first.title).toBeTruthy();
+    expect(first.url).toMatch(/^https:\/\/developer\.apple\.com\/documentation\//);
   });
 
-  describe('error cases', () => {
-    it('should handle missing searchData', () => {
-      const html = '<html><body>No search data</body></html>';
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-
-      expect(result.content[0].text).toContain('No results found');
-      expect(result.content[0].text).toContain('### Suggestions:');
-    });
-
-    it('should handle malformed HTML', () => {
-      const html = `
-        <div>Invalid HTML structure without search results</div>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-
-      expect(result.content[0].text).toContain('No results found');
-    });
-
-    it('should handle missing search results container', () => {
-      const html = `
-        <html>
-          <body>
-            <!-- Page without search results -->
-          </body>
-        </html>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-
-      expect(result.content[0].text).toContain('No results found for "test"');
-    });
-
-    it('should handle results with missing fields', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/test">Valid Result</a>
-              </h3>
-              <p class="result-description">Valid description</p>
-            </article>
-          </li>
-          <li class="search-result documentation">
-            <article>
-              <!-- Missing title -->
-              <p class="result-description">No title</p>
-            </article>
-          </li>
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                No URL
-              </h3>
-              <p class="result-description">No URL</p>
-            </article>
-          </li>
-        </ul>
-      `;
-
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
-
-      // Should include valid result
-      expect(text).toContain('### 1. Valid Result');
-      // Should skip invalid results
-      expect(text).not.toContain('No title');
-      expect(text).not.toContain('No URL');
-    });
+  it('the sample filter returns sample-code results (and only those)', () => {
+    // Regression: the fixture has `sampleCode` and `project` kinds. The `sample`
+    // filter previously returned zero because no kind mapped to `sample-code`.
+    const samples = mapSearchResults(fixture, 'sample');
+    expect(samples.length).toBeGreaterThan(0);
+    expect(samples.every((r) => r.type === 'sample-code')).toBe(true);
   });
 
-  describe('special cases', () => {
-    it('should handle special characters in query', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/test">Result</a>
-              </h3>
-              <p class="result-description">Test</p>
-            </article>
-          </li>
-        </ul>
-      `;
+  it('the documentation filter excludes samples', () => {
+    const docs = mapSearchResults(fixture, 'documentation');
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs.every((r) => r.type !== 'sample-code')).toBe(true);
+  });
 
-      const specialQuery = 'test & <special> "quoted"';
-      const result = parseSearchResults(html, specialQuery, mockSearchUrl);
+  it('the all filter includes both documentation and samples', () => {
+    const all = mapSearchResults(fixture, 'all');
+    expect(all.some((r) => r.type === 'sample-code')).toBe(true);
+    expect(all.some((r) => r.type.startsWith('documentation'))).toBe(true);
+  });
 
-      expect(result.content[0].text).toContain('**Query:** "test & <special> "quoted""');
-    });
+  it('extracts the framework from the hierarchy', () => {
+    const results = mapSearchResults(fixture, 'all');
+    const animations = results.find((r) => r.url.endsWith('/swiftui/animations'));
+    expect(animations?.framework).toBe('SwiftUI');
+  });
 
-    it('should handle beta and deprecated indicators', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/test/betaapi">BetaAPI</a>
-              </h3>
-              <p class="result-description">Beta This is a beta API.</p>
-              <span class="beta-badge">Beta</span>
-            </article>
-          </li>
-          <li class="search-result documentation">
-            <article>
-              <h3 class="result-title">
-                <a href="/documentation/test/deprecatedapi">DeprecatedAPI</a>
-              </h3>
-              <p class="result-description">Deprecated This API is deprecated.</p>
-              <span class="deprecated-badge">Deprecated</span>
-            </article>
-          </li>
-        </ul>
-      `;
+  it('de-duplicates by URL', () => {
+    const results = mapSearchResults(fixture, 'all');
+    const urls = results.map((r) => r.url.toLowerCase());
+    expect(new Set(urls).size).toBe(urls.length);
+  });
 
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
+  it('returns nothing for an empty response', () => {
+    expect(mapSearchResults({ results: [] }, 'all')).toEqual([]);
+    expect(mapSearchResults({}, 'all')).toEqual([]);
+  });
+});
 
-      expect(text).toContain('Beta This is a beta API');
-      expect(text).toContain('Deprecated This API is deprecated');
-    });
+describe('formatSearchResults', () => {
+  it('renders a header, query, and result entries', () => {
+    const results = mapSearchResults(fixture, 'all');
+    const text = formatSearchResults(results, 'swiftui animations', 'all', 'https://developer.apple.com/search/?q=x');
+    expect(text).toContain('# Apple Documentation Search Results');
+    expect(text).toContain('**Query:** "swiftui animations"');
+    expect(text).toContain('### 1.');
+  });
 
-    it('should handle archive URLs', () => {
-      const html = `
-        <ul class="search-results">
-          <li class="search-result general">
-            <article>
-              <h3 class="result-title">
-                <a href="/library/archive/documentation/test">Archived Content</a>
-              </h3>
-              <p class="result-description">Archived documentation.</p>
-            </article>
-          </li>
-        </ul>
-      `;
+  it('shows a no-results message that routes to the JSON-API tools', () => {
+    const text = formatSearchResults([], 'zzznotathing', 'all', 'https://developer.apple.com/search/?q=x');
+    expect(text).toContain('No results found for "zzznotathing"');
+    expect(text).toContain('### Suggestions:');
+    expect(text).toContain('get_apple_doc_content');
+  });
+});
 
-      const result = parseSearchResults(html, 'test', mockSearchUrl);
-      const text = result.content[0].text;
+describe('fetchAppleDocsSearch', () => {
+  afterEach(() => jest.restoreAllMocks());
 
-      // Since general type is filtered out, we should get no results
-      expect(text).toContain('No results found');
-    });
+  it('calls the search API and formats the results', async () => {
+    const spy = jest.spyOn(httpClient, 'postJson').mockResolvedValue(fixture);
+    const res = await fetchAppleDocsSearch('swiftui animations', 'all');
+    expect(spy).toHaveBeenCalledWith(
+      'https://devintserv.msc.sbz.apple.com/api/v1/search',
+      { text: 'swiftui animations', targetResultLocale: 'en' },
+    );
+    expect(res.content[0].text).toContain('# Apple Documentation Search Results');
+  });
+
+  it('degrades gracefully when the search API fails', async () => {
+    jest.spyOn(httpClient, 'postJson').mockRejectedValue(new Error('endpoint moved'));
+    const res = await fetchAppleDocsSearch('swiftui', 'all');
+    expect(res.content[0].text).toContain('Search is temporarily unavailable');
+    expect(res.content[0].text).toContain('get_apple_doc_content');
   });
 });

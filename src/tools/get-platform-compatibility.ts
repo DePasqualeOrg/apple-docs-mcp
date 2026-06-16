@@ -1,10 +1,11 @@
-import { convertToJsonApiUrl } from '../utils/url-converter.js';
+import { convertToJsonApiUrl, toAbsoluteAppleUrl } from '../utils/url-converter.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/error-handler.js';
 import { PROCESSING_LIMITS } from '../utils/constants.js';
 
 /**
- * 平台兼容性信息接口
+ * Platform compatibility info
  */
 interface PlatformInfo {
   name: string;
@@ -39,11 +40,11 @@ interface AppleDocData {
     title: string;
     identifiers: string[];
   }>;
-  references?: Record<string, any>;
+  references?: Record<string, { url?: string; title?: string }>;
 }
 
 /**
- * 获取平台兼容性分析
+ * Get platform compatibility analysis
  */
 export async function handleGetPlatformCompatibility(
   apiUrl: string,
@@ -53,20 +54,22 @@ export async function handleGetPlatformCompatibility(
   try {
     logger.info(`Analyzing platform compatibility for: ${apiUrl}`);
 
-    if (compareMode === 'framework') {
-      return await analyzeFrameworkCompatibility(apiUrl, includeRelated);
-    } else {
-      return await analyzeSingleApiCompatibility(apiUrl, includeRelated);
-    }
+    const analysis = compareMode === 'framework'
+      ? await analyzeFrameworkCompatibility(apiUrl, includeRelated)
+      : await analyzeSingleApiCompatibility(apiUrl, includeRelated);
+
+    // Collapse any stacked blank-line runs the section builders accumulate.
+    // Compatibility output contains no code blocks, so this only affects spacing.
+    return analysis.replace(/\n{3,}/g, '\n\n');
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to analyze platform compatibility: ${errorMessage}`;
   }
 }
 
 /**
- * 分析单个API的平台兼容性
+ * Analyze a single API's platform compatibility
  */
 async function analyzeSingleApiCompatibility(
   apiUrl: string,
@@ -85,18 +88,20 @@ async function analyzeSingleApiCompatibility(
   }
 
   const analysis = analyzeCompatibility(
-    data.metadata.title || 'Unknown API',
+    data.metadata.title ?? 'Unknown API',
     apiUrl,
     data.metadata.platforms,
   );
 
   let result = formatCompatibilityAnalysis(analysis);
 
-  // 如果需要包含相关API的兼容性信息
+  // If related-API compatibility info should be included
   if (includeRelated && data.topicSections) {
-    const relatedAnalyses = await analyzeRelatedCompatibility(data, 3); // 限制3个相关API
+    const relatedAnalyses = await analyzeRelatedCompatibility(data, 3); // limit to 3 related APIs
     if (relatedAnalyses.length > 0) {
-      result += '\n\n## Related APIs Compatibility\n\n';
+      // formatCompatibilityAnalysis already ends with a blank line, so don't add
+      // another leading one here (would make a triple blank line).
+      result += '## Related APIs Compatibility\n\n';
       for (const relatedAnalysis of relatedAnalyses) {
         result += formatCompatibilityAnalysis(relatedAnalysis, true) + '\n';
       }
@@ -107,19 +112,19 @@ async function analyzeSingleApiCompatibility(
 }
 
 /**
- * 分析框架的平台兼容性
+ * Analyze a framework's platform compatibility
  */
 async function analyzeFrameworkCompatibility(
   frameworkUrl: string,
   includeRelated: boolean,
 ): Promise<string> {
-  // 这里可以扩展为分析整个框架的兼容性
-  // 暂时使用单API分析作为基础
-  return await analyzeSingleApiCompatibility(frameworkUrl, includeRelated || true);
+  // This could be extended to analyze the whole framework's compatibility
+  // For now, use the single-API analysis as the basis
+  return await analyzeSingleApiCompatibility(frameworkUrl, includeRelated);
 }
 
 /**
- * 分析相关API的兼容性
+ * Analyze related APIs' compatibility
  */
 async function analyzeRelatedCompatibility(
   data: AppleDocData,
@@ -137,7 +142,7 @@ async function analyzeRelatedCompatibility(
       break;
     }
 
-    for (const identifier of section.identifiers.slice(0, PROCESSING_LIMITS.MAX_PLATFORM_COMPATIBILITY_ITEMS)) { // 每个section最多2个
+    for (const identifier of section.identifiers.slice(0, PROCESSING_LIMITS.MAX_PLATFORM_COMPATIBILITY_ITEMS)) { // at most 2 per section
       if (count >= maxRelated) {
         break;
       }
@@ -145,7 +150,7 @@ async function analyzeRelatedCompatibility(
       const ref = data.references[identifier];
       if (ref?.url) {
         try {
-          const relatedUrl = `https://developer.apple.com${ref.url}`;
+          const relatedUrl = toAbsoluteAppleUrl(ref.url);
           const relatedJsonUrl = convertToJsonApiUrl(relatedUrl);
 
           if (!relatedJsonUrl) {
@@ -156,7 +161,7 @@ async function analyzeRelatedCompatibility(
           const relatedData = await httpClient.getJson<AppleDocData>(relatedJsonUrl);
           if (relatedData.metadata?.platforms) {
             const analysis = analyzeCompatibility(
-              ref.title || 'Unknown',
+              ref.title ?? 'Unknown',
               relatedUrl,
               relatedData.metadata.platforms,
             );
@@ -164,7 +169,7 @@ async function analyzeRelatedCompatibility(
             count++;
           }
         } catch (error) {
-          // 忽略单个相关API的错误
+          // Ignore errors from individual related APIs
           logger.error(`Failed to fetch related API ${identifier}:`, error);
         }
       }
@@ -175,7 +180,7 @@ async function analyzeRelatedCompatibility(
 }
 
 /**
- * 分析兼容性数据
+ * Analyze compatibility data
  */
 function analyzeCompatibility(
   apiName: string,
@@ -218,7 +223,7 @@ function analyzeCompatibility(
 
 
 /**
- * 格式化兼容性分析结果
+ * Format the compatibility analysis results
  */
 function formatCompatibilityAnalysis(analysis: CompatibilityAnalysis, isRelated: boolean = false): string {
   const prefix = isRelated ? '### ' : '# ';
@@ -228,7 +233,7 @@ function formatCompatibilityAnalysis(analysis: CompatibilityAnalysis, isRelated:
     content += `**API:** [${analysis.apiUrl}](${analysis.apiUrl})\n\n`;
   }
 
-  // 平台支持概览
+  // Platform support overview
   content += '## Platform Support Summary\n\n';
   content += `**Supported Platforms:** ${analysis.supportedPlatforms.join(', ')}\n`;
   content += `**Cross-Platform:** ${analysis.crossPlatformSupport ? 'Yes' : 'No'}\n`;
@@ -243,7 +248,7 @@ function formatCompatibilityAnalysis(analysis: CompatibilityAnalysis, isRelated:
 
   content += '\n';
 
-  // 详细平台信息
+  // Detailed platform information
   content += '## Detailed Platform Information\n\n';
 
   for (const platform of analysis.platforms) {
@@ -283,7 +288,7 @@ function formatCompatibilityAnalysis(analysis: CompatibilityAnalysis, isRelated:
     content += '\n';
   }
 
-  // 兼容性建议
+  // Compatibility recommendations
   content += '## Compatibility Recommendations\n\n';
 
   if (analysis.crossPlatformSupport) {
@@ -300,7 +305,7 @@ function formatCompatibilityAnalysis(analysis: CompatibilityAnalysis, isRelated:
     content += '⚠️ **Deprecated platforms** - Consider migration plans for deprecated platforms\n\n';
   }
 
-  // 最低版本要求
+  // Minimum version requirements
   if (Object.keys(analysis.minVersions).length > 0) {
     content += '## Minimum Version Requirements\n\n';
     for (const [platform, version] of Object.entries(analysis.minVersions)) {

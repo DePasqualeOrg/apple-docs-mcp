@@ -5,7 +5,7 @@
 import { handleListTechnologies } from '../tools/list-technologies.js';
 import { handleGetDocumentationUpdates } from '../tools/get-documentation-updates.js';
 import { handleGetTechnologyOverviews } from '../tools/get-technology-overviews.js';
-import { apiCache, technologiesCache, updatesCache, technologyOverviewsCache } from './cache.js';
+import { technologiesCache, updatesCache, technologyOverviewsCache } from './cache.js';
 import { logger } from './logger.js';
 
 /**
@@ -81,17 +81,16 @@ async function warmUpOverviewsCache(): Promise<void> {
   try {
     logger.info('Warming up technology overviews cache...');
 
-    // Load popular categories
+    // Load popular categories (real technologyoverviews slugs)
     const categories = [
-      'swiftui',
-      'uikit',
       'app-design-and-ui',
       'ai-machine-learning',
-      'augmented-reality',
+      'games',
+      'data-management',
     ];
 
     for (const category of categories) {
-      await handleGetTechnologyOverviews(category, 'all', undefined, true, 20);
+      await handleGetTechnologyOverviews(category, undefined, true, 20);
     }
 
     const stats = technologyOverviewsCache.getStats();
@@ -102,37 +101,15 @@ async function warmUpOverviewsCache(): Promise<void> {
 }
 
 /**
- * Get cache warm-up status
- */
-export function getCacheWarmUpStatus(): {
-  technologiesCacheSize: number;
-  updatesCacheSize: number;
-  overviewsCacheSize: number;
-  apiCacheSize: number;
-  totalCacheEntries: number;
-  } {
-  const techStats = technologiesCache.getStats();
-  const updatesStats = updatesCache.getStats();
-  const overviewsStats = technologyOverviewsCache.getStats();
-  const apiStats = apiCache.getStats();
-
-  return {
-    technologiesCacheSize: techStats.size,
-    updatesCacheSize: updatesStats.size,
-    overviewsCacheSize: overviewsStats.size,
-    apiCacheSize: apiStats.size,
-    totalCacheEntries: techStats.size + updatesStats.size + overviewsStats.size + apiStats.size,
-  };
-}
-
-/**
  * Schedule periodic cache refresh
  */
 export function schedulePeriodicCacheRefresh(intervalMs: number = 30 * 60 * 1000): void {
   logger.info(`Scheduling cache refresh every ${intervalMs / 1000 / 60} minutes`);
 
-  setInterval(() => {
+  const timer = setInterval(() => {
     logger.info('Running periodic cache refresh...');
     void warmUpCaches();
   }, intervalMs);
+  // Don't keep the process alive solely for cache refreshes.
+  timer.unref();
 }

@@ -8,10 +8,6 @@ jest.mock('../../src/utils/cache.js', () => ({
     get: jest.fn(),
     set: jest.fn(),
   },
-  docCache: {
-    get: jest.fn(),
-    set: jest.fn(),
-  },
   generateEnhancedCacheKey: jest.fn((url) => `cache-key-${url}`),
 }));
 
@@ -22,10 +18,12 @@ jest.mock('../../src/utils/http-client.js', () => ({
 }));
 
 jest.mock('../../src/utils/url-converter.js', () => ({
+  // Keep the real helpers (e.g. toAbsoluteAppleUrl) and mock only the converter.
+  ...jest.requireActual('../../src/utils/url-converter.js'),
   convertToJsonApiUrl: jest.fn(),
 }));
 
-import { apiCache, docCache } from '../../src/utils/cache.js';
+import { apiCache } from '../../src/utils/cache.js';
 import { httpClient } from '../../src/utils/http-client.js';
 import { convertToJsonApiUrl } from '../../src/utils/url-converter.js';
 

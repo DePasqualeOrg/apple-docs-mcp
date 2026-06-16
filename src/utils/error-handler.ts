@@ -12,6 +12,24 @@ export type { AppError };
 export { ErrorType };
 
 /**
+ * Extract a human-readable message from an unknown thrown value.
+ *
+ * Handles the three shapes that reach a catch block here: an `AppError` (a plain
+ * object with a string `message`, as returned by `handleFetchError` — note it is
+ * NOT an `Error` instance), a real `Error`, and anything else. The naive
+ * `error instanceof Error ? error.message : String(error)` renders an `AppError`
+ * as the literal `[object Object]`, so prefer this everywhere a fetch/parse error
+ * may surface.
+ */
+export function getErrorMessage(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message: unknown }).message;
+    return typeof message === 'string' ? message : String(message);
+  }
+  return String(error);
+}
+
+/**
  * Create a standardized error response
  */
 export function createErrorResponse(error: AppError): ErrorResponse {
@@ -50,7 +68,8 @@ export function handleFetchError(error: unknown, url: string): AppError {
   }
 
   if (error instanceof Error) {
-    if (error.message.includes('timeout')) {
+    const lowerMessage = error.message.toLowerCase();
+    if (lowerMessage.includes('timeout') || lowerMessage.includes('timed out')) {
       return {
         type: ErrorType.TIMEOUT,
         message: ERROR_MESSAGES.TIMEOUT,
@@ -122,15 +141,6 @@ export function validateInput(value: string, fieldName: string, minLength: numbe
 }
 
 /**
- * Log error for debugging (only in development)
- */
-export function logError(error: AppError, context?: string): void {
-  if (process.env.NODE_ENV === 'development') {
-    logger.error(`[${context ?? 'ERROR'}] ${error.message}`, error.originalError);
-  }
-}
-
-/**
  * Handle generic errors and convert them to AppError
  */
 export function handleGenericError(error: unknown, context: string, fallbackMessage?: string): AppError {
@@ -194,7 +204,7 @@ export function handleGenericError(error: unknown, context: string, fallbackMess
 
   return {
     type: ErrorType.UNKNOWN,
-    message: fallbackMessage || `An error occurred in ${context}`,
+    message: fallbackMessage ?? `An error occurred in ${context}`,
     suggestions: [
       'Try again later',
       'Check your input parameters',
@@ -209,53 +219,6 @@ export function handleGenericError(error: unknown, context: string, fallbackMess
 export function createStandardErrorResponse(error: unknown, operation: string): ErrorResponse {
   const appError = handleGenericError(error, operation);
   return createErrorResponse(appError);
-}
-
-/**
- * Wrap async functions with error handling
- */
-export async function withErrorHandling<T>(
-  operation: () => Promise<T>,
-  context: string,
-  fallbackMessage?: string,
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    const appError = handleGenericError(error, context, fallbackMessage);
-    logError(appError, context);
-    throw appError;
-  }
-}
-
-/**
- * Validate multiple input parameters
- */
-export function validateInputs(
-  validations: Array<{ value: string; fieldName: string; minLength?: number }>,
-): AppError | null {
-  for (const validation of validations) {
-    const error = validateInput(validation.value, validation.fieldName, validation.minLength);
-    if (error) {
-      return error;
-    }
-  }
-  return null;
-}
-
-/**
- * Handle cache-related errors
- */
-export function handleCacheError(error: unknown, operation: string): AppError {
-  return {
-    type: ErrorType.CACHE_ERROR,
-    message: `Cache operation failed: ${operation}`,
-    originalError: error instanceof Error ? error : undefined,
-    suggestions: [
-      'The operation will continue without cache',
-      'Try clearing the cache if issues persist',
-    ],
-  };
 }
 
 /**

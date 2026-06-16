@@ -1,9 +1,10 @@
-import { convertToJsonApiUrl } from '../utils/url-converter.js';
+import { convertToJsonApiUrl, toAbsoluteAppleUrl } from '../utils/url-converter.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/error-handler.js';
 
 /**
- * 解析的引用信息接口
+ * Resolved reference info
  */
 interface ResolvedReference {
   identifier: string;
@@ -32,11 +33,11 @@ interface ReferenceData {
   type?: string;
   role?: string;
   kind?: string;
-  abstract?: any[];
-  fragments?: any[];
-  platforms?: any[];
+  abstract?: Array<{ text?: string }>;
+  fragments?: Array<{ kind?: string; text?: string }>;
+  platforms?: Array<{ name?: string; introducedAt?: string; beta?: boolean; deprecated?: boolean }>;
   symbolKind?: string;
-  navigatorTitle?: any[];
+  navigatorTitle?: Array<{ text?: string }>;
 }
 
 interface AppleDocData {
@@ -47,7 +48,7 @@ interface AppleDocData {
 }
 
 /**
- * 批量解析引用
+ * Resolve references in batch
  */
 export async function handleResolveReferencesBatch(
   sourceUrl: string,
@@ -57,7 +58,7 @@ export async function handleResolveReferencesBatch(
   try {
     logger.info(`Resolving references from: ${sourceUrl}`);
 
-    // 将网页URL转换为JSON API URL
+    // Convert the web URL to a JSON API URL
     const jsonApiUrl = convertToJsonApiUrl(sourceUrl);
 
     if (!jsonApiUrl) {
@@ -70,11 +71,12 @@ export async function handleResolveReferencesBatch(
       return `No references found in: ${sourceUrl}`;
     }
 
-    // 过滤和限制引用数量
+    // Filter and limit the number of references
     const filteredReferences = filterReferences(data.references, filterByType);
-    const limitedReferences = Object.entries(filteredReferences).slice(0, maxReferences);
+    const filteredEntries = Object.entries(filteredReferences);
+    const limitedReferences = filteredEntries.slice(0, maxReferences);
 
-    // 解析引用信息
+    // Resolve the reference info
     const resolvedReferences: ResolvedReference[] = [];
 
     for (const [identifier, refData] of limitedReferences) {
@@ -84,11 +86,16 @@ export async function handleResolveReferencesBatch(
       }
     }
 
-    // 格式化输出
-    return formatResolvedReferences(sourceUrl, resolvedReferences, data.metadata?.title);
+    // Format the output
+    return formatResolvedReferences(
+      sourceUrl,
+      resolvedReferences,
+      data.metadata?.title,
+      filteredEntries.length,
+    );
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to resolve references: ${errorMessage}`;
   }
 }
@@ -96,7 +103,7 @@ export async function handleResolveReferencesBatch(
 
 
 /**
- * 过滤引用
+ * Filter references
  */
 function filterReferences(
   references: Record<string, ReferenceData>,
@@ -113,7 +120,10 @@ function filterReferences(
       refData.role === filterByType ||
       refData.kind === filterByType ||
       refData.type === filterByType ||
-      refData.symbolKind === filterByType;
+      refData.symbolKind === filterByType ||
+      // Apple groups topic collections under the `collectionGroup` role; treat
+      // the friendlier "collection" filter as matching both.
+      (filterByType === 'collection' && refData.role === 'collectionGroup');
 
     if (matchesFilter) {
       filtered[identifier] = refData;
@@ -124,47 +134,47 @@ function filterReferences(
 }
 
 /**
- * 解析单个引用
+ * Resolve a single reference
  */
 async function resolveReference(
   identifier: string,
   refData: ReferenceData,
 ): Promise<ResolvedReference | null> {
   try {
-    // 基本信息
+    // Basic info
     const resolved: ResolvedReference = {
       identifier,
       title: refData.title || 'Unknown',
-      url: refData.url ? `https://developer.apple.com${refData.url}` : '#',
-      type: refData.type || 'unknown',
-      role: refData.role || 'unknown',
+      url: toAbsoluteAppleUrl(refData.url),
+      type: refData.type ?? 'unknown',
+      role: refData.role ?? 'unknown',
       kind: refData.kind,
       symbolKind: refData.symbolKind,
     };
 
-    // 处理摘要
+    // Process the abstract
     if (refData.abstract && Array.isArray(refData.abstract)) {
       resolved.abstract = refData.abstract
-        .map(item => item.text || '')
+        .map(item => item.text ?? '')
         .join(' ')
         .trim();
     }
 
-    // 处理代码片段
+    // Process code fragments
     if (refData.fragments && Array.isArray(refData.fragments)) {
       resolved.fragments = refData.fragments.map(fragment => ({
-        kind: fragment.kind || 'text',
-        text: fragment.text || '',
+        kind: fragment.kind ?? 'text',
+        text: fragment.text ?? '',
       }));
     }
 
-    // 处理平台信息
+    // Process platform info
     if (refData.platforms && Array.isArray(refData.platforms)) {
       resolved.platforms = refData.platforms.map(platform => ({
-        name: platform.name || 'Unknown',
+        name: platform.name ?? 'Unknown',
         introducedAt: platform.introducedAt,
-        beta: platform.beta || false,
-        deprecated: platform.deprecated || false,
+        beta: platform.beta ?? false,
+        deprecated: platform.deprecated ?? false,
       }));
     }
 
@@ -177,23 +187,32 @@ async function resolveReference(
 }
 
 /**
- * 格式化解析结果
+ * Format the resolved results
  */
 function formatResolvedReferences(
   sourceUrl: string,
   references: ResolvedReference[],
   sourceTitle?: string,
+  totalAvailable?: number,
 ): string {
   if (references.length === 0) {
     return `No references could be resolved from: ${sourceUrl}`;
   }
 
-  const title = sourceTitle || new URL(sourceUrl).pathname.split('/').pop() || 'Document';
+  // filter(Boolean) drops empty path segments so a trailing slash doesn't make
+  // pop() return '' (which ?? would keep); the chain is then safely nullish.
+  const title = sourceTitle ?? new URL(sourceUrl).pathname.split('/').filter(Boolean).pop() ?? 'Document';
   let content = `# References from ${title}\n\n`;
   content += `**Source:** [${sourceUrl}](${sourceUrl})\n\n`;
   content += `**Resolved ${references.length} references:**\n\n`;
 
-  // 按类型分组
+  // Make truncation explicit so a partial listing is never mistaken for a
+  // complete one (e.g. enumerating an enum's cases).
+  if (typeof totalAvailable === 'number' && totalAvailable > references.length) {
+    content += `> Showing ${references.length} of ${totalAvailable} matching references. Raise \`maxReferences\` (max 200) to see more.\n\n`;
+  }
+
+  // Group by type
   const groupedReferences = groupReferencesByRole(references);
 
   for (const [role, refs] of Object.entries(groupedReferences)) {
@@ -210,7 +229,7 @@ function formatResolvedReferences(
 }
 
 /**
- * 按角色分组引用
+ * Group references by role
  */
 function groupReferencesByRole(references: ResolvedReference[]): Record<string, ResolvedReference[]> {
   const groups: Record<string, ResolvedReference[]> = {};
@@ -227,7 +246,7 @@ function groupReferencesByRole(references: ResolvedReference[]): Record<string, 
 }
 
 /**
- * 格式化角色标题
+ * Format the role title
  */
 function formatRoleTitle(role: string): string {
   const roleTitles: Record<string, string> = {
@@ -244,12 +263,12 @@ function formatRoleTitle(role: string): string {
 }
 
 /**
- * 格式化单个引用
+ * Format a single reference
  */
 function formatSingleReference(ref: ResolvedReference): string {
   let content = `### [${ref.title}](${ref.url})\n`;
 
-  // 添加代码片段（如果是符号）
+  // Add code fragment (if it's a symbol)
   if (ref.fragments && ref.fragments.length > 0) {
     const codeSignature = ref.fragments.map(f => f.text).join('');
     if (codeSignature.trim()) {
@@ -257,12 +276,12 @@ function formatSingleReference(ref: ResolvedReference): string {
     }
   }
 
-  // 添加摘要
+  // Add the abstract
   if (ref.abstract) {
     content += `${ref.abstract}\n\n`;
   }
 
-  // 添加元数据
+  // Add metadata
   const metadata = [];
   if (ref.kind) {
     metadata.push(`Kind: ${ref.kind}`);
@@ -274,7 +293,7 @@ function formatSingleReference(ref: ResolvedReference): string {
     content += `*${metadata.join(' | ')}*\n\n`;
   }
 
-  // 添加平台信息
+  // Add platform info
   if (ref.platforms && ref.platforms.length > 0) {
     const platformInfo = ref.platforms.map(p => {
       let info = p.name;

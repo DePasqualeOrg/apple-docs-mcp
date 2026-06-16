@@ -15,8 +15,9 @@ export class MemoryCache {
     this.maxSize = maxSize;
     this.defaultTTL = defaultTTL;
 
-    // Clean up expired entries every 5 minutes
-    setInterval(() => this.cleanup(), 5 * 60 * 1000);
+    // Clean up expired entries every 5 minutes. unref() so this timer never
+    // keeps the process alive on its own.
+    setInterval(() => this.cleanup(), 5 * 60 * 1000).unref();
   }
 
   /**
@@ -41,7 +42,11 @@ export class MemoryCache {
   }
 
   /**
-   * Get value from cache
+   * Get value from cache.
+   *
+   * On a hit the entry is re-inserted so it becomes most-recently-used, which is
+   * what makes eviction LRU rather than FIFO (a Map preserves insertion order,
+   * and the eviction in set() removes the first/oldest key).
    */
   get<T>(key: string): T | undefined {
     const entry = this.cache.get(key);
@@ -57,19 +62,27 @@ export class MemoryCache {
       return undefined;
     }
 
+    // Refresh recency: move this key to the end of the insertion order.
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+
     this.hits++;
     return entry.data as T;
   }
 
   /**
-   * Set value in cache
+   * Set value in cache. Evicts the least-recently-used entry when full.
    */
   set<T>(key: string, value: T, ttl?: number): void {
-    // If cache is full, remove oldest entry
+    // Delete first so a re-set moves the key to the end (most recently used)
+    // rather than updating in place and keeping its old recency position.
+    this.cache.delete(key);
+
+    // If cache is full, evict the least-recently-used (first) entry.
     if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey) {
-        this.cache.delete(firstKey);
+      const lruKey = this.cache.keys().next().value;
+      if (lruKey) {
+        this.cache.delete(lruKey);
       }
     }
 
@@ -159,11 +172,12 @@ export class MemoryCache {
   }
 }
 
-import { CACHE_SIZE, CACHE_TTL } from './constants.js';
+import { CACHE_SIZE, CACHE_TTL, WWDC_CONFIG } from './constants.js';
 
-// Create different cache instances for different types of data
+// Create different cache instances for different types of data.
+// Note: search results are not cached — the search endpoint is volatile and the
+// tool degrades gracefully, so there is no searchCache.
 export const apiCache = new MemoryCache(CACHE_SIZE.API_DOCS, CACHE_TTL.API_DOCS);
-export const searchCache = new MemoryCache(CACHE_SIZE.SEARCH_RESULTS, CACHE_TTL.SEARCH_RESULTS);
 export const indexCache = new MemoryCache(CACHE_SIZE.FRAMEWORK_INDEX, CACHE_TTL.FRAMEWORK_INDEX);
 export const technologiesCache = new MemoryCache(CACHE_SIZE.TECHNOLOGIES, CACHE_TTL.TECHNOLOGIES);
 export const updatesCache = new MemoryCache(CACHE_SIZE.UPDATES, CACHE_TTL.UPDATES);
@@ -172,7 +186,7 @@ export const technologyOverviewsCache = new MemoryCache(
   CACHE_SIZE.TECHNOLOGY_OVERVIEWS,
   CACHE_TTL.TECHNOLOGY_OVERVIEWS,
 );
-export const wwdcDataCache = new MemoryCache(100, 30 * 60 * 1000); // 30 minutes TTL
+export const wwdcDataCache = new MemoryCache(CACHE_SIZE.WWDC_DATA, WWDC_CONFIG.CACHE_TTL);
 
 /**
  * Generate cache key for URL-based requests
@@ -204,95 +218,4 @@ export function generateEnhancedCacheKey(
   return generateUrlCacheKey(url, options);
 }
 
-/**
- * Cache decorator for async functions
- */
-export function cached<T>(
-  cache: MemoryCache,
-  keyGenerator: (...args: unknown[]) => string,
-  ttl?: number,
-) {
-  return function (_target: unknown, _propertyName: string, descriptor: PropertyDescriptor) {
-    const method = descriptor.value;
-
-    descriptor.value = async function (...args: unknown[]): Promise<T> {
-      const key = keyGenerator(...args);
-
-      return cache.getOrSet(
-        key,
-        () => method.apply(this, args),
-        ttl,
-      );
-    };
-  };
-}
-
-/**
- * Cache decorator (alias for compatibility)
- */
-export function withCache<T = any>(
-  cache: MemoryCache,
-  keyGenerator?: (...args: any[]) => string,
-  ttl?: number,
-) {
-  return function (_target: any, _propertyName: string, descriptor?: PropertyDescriptor) {
-    // Handle the case where descriptor might be undefined (TypeScript decorators)
-    if (!descriptor) {
-      throw new Error('withCache decorator requires a method descriptor');
-    }
-
-    const method = descriptor.value;
-    if (!method) {
-      throw new Error('withCache decorator can only be applied to methods');
-    }
-
-    const isAsync = method.constructor.name === 'AsyncFunction';
-
-    descriptor.value = function (...args: any[]): any {
-      const key = keyGenerator ? keyGenerator(...args) : JSON.stringify(args);
-
-      // Try to get from cache first
-      const cached = cache.get<T>(key);
-      if (cached !== undefined) {
-        return cached;
-      }
-
-      // Execute the method
-      const result = method.apply(this, args);
-
-      // Handle both sync and async methods
-      if (isAsync || result instanceof Promise) {
-        return Promise.resolve(result).then((data) => {
-          cache.set(key, data, ttl);
-          return data;
-        }).catch((error) => {
-          // Don't cache errors
-          throw error;
-        });
-      } else {
-        // Sync method
-        cache.set(key, result, ttl);
-        return result;
-      }
-    };
-
-    return descriptor;
-  };
-}
-
-/**
- * Get cache instance by name (singleton pattern)
- */
-const cacheInstances = new Map<string, MemoryCache>();
-
-export function getCacheInstance(
-  name: string,
-  maxSize?: number,
-  defaultTTL?: number,
-): MemoryCache {
-  if (!cacheInstances.has(name)) {
-    cacheInstances.set(name, new MemoryCache(maxSize, defaultTTL));
-  }
-  return cacheInstances.get(name)!;
-}
 

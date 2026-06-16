@@ -27,10 +27,10 @@ describe('URL Converter', () => {
       expect(convertToJsonApiUrl(webUrl)).toBe(expected);
     });
 
-    it('should return original URL if not recognized format', () => {
+    it('should return null for an Apple URL with no JSON API equivalent', () => {
       const webUrl = 'https://developer.apple.com/news/some-article';
-      
-      expect(convertToJsonApiUrl(webUrl)).toBe(webUrl);
+
+      expect(convertToJsonApiUrl(webUrl)).toBeNull();
     });
   });
 
@@ -73,18 +73,15 @@ describe('URL Converter', () => {
           expected: 'nsstring'
         },
         {
+          // A trailing slash must not hide the name: empty segments are dropped,
+          // so this still resolves to 'view'.
           url: 'https://developer.apple.com/documentation/swiftui/view/',
-          expected: ''
+          expected: 'view'
         }
       ];
 
       testCases.forEach(({ url, expected }) => {
-        const result = extractApiNameFromUrl(url);
-        if (expected === '') {
-          expect(result).toBe('Unknown API');
-        } else {
-          expect(result).toBe(expected);
-        }
+        expect(extractApiNameFromUrl(url)).toBe(expected);
       });
     });
 

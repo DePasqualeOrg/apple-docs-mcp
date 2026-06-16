@@ -40,11 +40,33 @@ export function convertToJsonApiUrl(webUrl: string): string | null {
       return `https://developer.apple.com/tutorials/data/${tutorialPath}.json`;
     }
 
-    // If not a recognized URL format, return the original URL
-    return webUrl;
+    // Unrecognized path on an Apple host (e.g. /news/, /videos/): there is no
+    // JSON API equivalent, so return null. Callers treat null as "not a
+    // documentation URL" and fail fast, rather than fetching an HTML page and
+    // erroring on JSON.parse.
+    return null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Build an absolute developer.apple.com URL from a reference's `url` field.
+ *
+ * Apple's `references` map normally stores site-relative paths (e.g.
+ * `/documentation/swiftui/view`), so the common case is to prepend the host.
+ * An already-absolute URL is returned unchanged, which prevents producing a
+ * malformed `https://developer.apple.com/https://…` if Apple ever emits one.
+ * Missing or empty input yields `fallback` (default `'#'`).
+ *
+ * @param url The reference URL (relative path or absolute), if present
+ * @param fallback Value to return when `url` is missing/empty
+ */
+export function toAbsoluteAppleUrl(url: string | null | undefined, fallback = '#'): string {
+  if (!url) {
+    return fallback;
+  }
+  return url.startsWith('http') ? url : `https://developer.apple.com${url}`;
 }
 
 /**
@@ -68,7 +90,8 @@ export function isValidAppleDeveloperUrl(url: string): boolean {
  */
 export function extractApiNameFromUrl(url: string): string {
   try {
-    return new URL(url).pathname.split('/').pop() || 'Unknown API';
+    // filter(Boolean) drops empty segments so a trailing slash doesn't yield ''.
+    return new URL(url).pathname.split('/').filter(Boolean).pop() ?? 'Unknown API';
   } catch {
     return 'Unknown API';
   }

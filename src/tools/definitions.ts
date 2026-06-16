@@ -74,7 +74,7 @@ export const toolDefinitions: Tool[] = [
       properties: {
         category: {
           type: 'string',
-          description: 'Filter by category (case-sensitive). Popular: "App frameworks" (SwiftUI, UIKit), "Graphics and games" (Metal, SpriteKit), "App services" (CloudKit, StoreKit), "Media" (AVFoundation), "System" (Foundation). Leave empty to see all categories.',
+          description: 'Filter by category (case-insensitive; slug or display form both work). Popular: "App Frameworks" (SwiftUI, UIKit), "Graphics & Games" (Metal, SpriteKit), "App Services" (CloudKit, StoreKit), "Media" (AVFoundation), "System" (Foundation). Leave empty to see all categories.',
         },
         language: {
           type: 'string',
@@ -140,14 +140,14 @@ export const toolDefinitions: Tool[] = [
         },
         maxReferences: {
           type: 'number',
-          description: 'Limit resolved references (default: 20, max: 50). Higher values = more comprehensive but slower.',
+          description: 'Limit resolved references (default: 20, max: 200). Higher values = more comprehensive but slower. Use a high value to enumerate an enum\'s cases or a type\'s full member list.',
           minimum: 1,
-          maximum: 50,
+          maximum: 200,
         },
         filterByType: {
           type: 'string',
-          enum: ['all', 'symbol', 'collection', 'article', 'protocol', 'class', 'struct', 'enum'],
-          description: 'Filter by reference type. Use "protocol" for protocol requirements, "class" for class hierarchies. Default: "all"',
+          enum: ['all', 'symbol', 'collection', 'article', 'sampleCode'],
+          description: 'Filter references by role: "symbol" (types, methods, properties), "collection" (grouped topics), "article", or "sampleCode". Default: "all"',
         },
       },
       required: ['sourceUrl'],
@@ -262,16 +262,11 @@ export const toolDefinitions: Tool[] = [
       properties: {
         category: {
           type: 'string',
-          description: 'Topic category. Popular: "app-design-and-ui", "games", "ai-machine-learning", "augmented-reality", "privacy-and-security". Leave empty to browse all.',
-        },
-        platform: {
-          type: 'string',
-          enum: ['all', 'ios', 'macos', 'watchos', 'tvos', 'visionos'],
-          description: 'Target platform. "all" for cross-platform content. Default: "all"',
+          description: 'Topic category slug. Real values: "app-design-and-ui", "games", "ai-machine-learning", "data-management", "core-experiences", "audio-and-video", "graphics-drawing-and-animation", "tools-and-distribution", "hardware-networking-sensors". Leave empty to browse all.',
         },
         searchQuery: {
           type: 'string',
-          description: 'Search terms. Try: "getting started", "best practices", "architecture", "performance".',
+          description: 'Case-insensitive substring match against the broad overview titles (e.g. "App design and UI", "Graphics, drawing, and animation"). Use words from those titles like "graphics", "audio", "machine learning", or "games".',
         },
         includeSubcategories: {
           type: 'boolean',

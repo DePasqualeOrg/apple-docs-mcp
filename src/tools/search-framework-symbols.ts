@@ -3,6 +3,7 @@ import { indexCache, generateUrlCacheKey } from '../utils/cache.js';
 import { APPLE_URLS, API_LIMITS, PROCESSING_LIMITS } from '../utils/constants.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/error-handler.js';
 import { normalizeFrameworkName } from '../utils/framework-mapper.js';
 
 /**
@@ -64,7 +65,7 @@ interface FrameworkIndex {
 }
 
 /**
- * 搜索框架中的符号（类、结构体、协议等）
+ * Search a framework's symbols (classes, structs, protocols, etc.)
  */
 // Function to find symbols recursively (defined outside to reduce complexity)
 function findSymbolsRecursive(
@@ -122,7 +123,7 @@ export async function searchFrameworkSymbols(
     const normalizedFramework = normalizeFrameworkName(framework);
     logger.info(`Searching ${symbolType} symbols in ${normalizedFramework} framework`);
 
-    // 获取框架索引
+    // Fetch the framework index
     const indexUrl = `${APPLE_URLS.TUTORIALS_DATA}index/${framework.toLowerCase()}`;
     const cacheKey = generateUrlCacheKey(indexUrl, { framework: normalizedFramework, symbolType, namePattern, language, limit });
 
@@ -197,7 +198,7 @@ export async function searchFrameworkSymbols(
     return result;
 
   } catch (error) {
-    return `Error searching classes: ${error instanceof Error ? error.message : String(error)}`;
+    return `Error searching classes: ${getErrorMessage(error)}`;
   }
 }
 

@@ -2,6 +2,7 @@ import { updatesCache, generateUrlCacheKey } from '../utils/cache.js';
 import { APPLE_URLS } from '../utils/constants.js';
 import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+import { toAbsoluteAppleUrl } from '../utils/url-converter.js';
 
 /**
  * Interface for Updates data
@@ -119,7 +120,7 @@ function parseUpdates(updatesData: UpdatesData, updatesIndex: UpdatesIndexData) 
         if (reference) {
           const updateItem: UpdateItem = {
             title: reference.title,
-            url: reference.url ? `https://developer.apple.com${reference.url}` : '',
+            url: toAbsoluteAppleUrl(reference.url, ''),
             description: reference.abstract?.[0]?.text ?? '',
             category: sectionCategory,
             type: reference.kind ?? 'update',
@@ -229,7 +230,7 @@ function applyUpdatesFilters(
   if (filters.technology) {
     const techLower = filters.technology.toLowerCase();
     filtered = filtered.filter(update =>
-      (update.technology?.toLowerCase().includes(techLower)) ||
+      (update.technology?.toLowerCase().includes(techLower) ?? false) ||
       update.title.toLowerCase().includes(techLower) ||
       update.description.toLowerCase().includes(techLower),
     );

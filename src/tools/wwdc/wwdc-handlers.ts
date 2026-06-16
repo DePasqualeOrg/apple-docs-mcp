@@ -2,8 +2,9 @@
  * WWDC Video MCP Tool Handlers
  */
 
-import type { WWDCVideo } from '../../types/wwdc.js';
+import type { WWDCVideo, GlobalMetadata } from '../../types/wwdc.js';
 import { logger } from '../../utils/logger.js';
+import { getErrorMessage } from '../../utils/error-handler.js';
 import {
   loadGlobalMetadata,
   loadTopicIndex,
@@ -34,6 +35,17 @@ async function loadVideosData(videoFiles: string[]): Promise<WWDCVideo[]> {
 }
 
 /**
+ * A one-line note that the WWDC data is a bundled, point-in-time snapshot, so
+ * answers about recent sessions may be incomplete until the package is updated.
+ * Appended once to every WWDC tool's output by the dispatcher (see handlers.ts)
+ * so the footer can't drift out of sync across tools.
+ */
+export function wwdcFreshnessNote(metadata: GlobalMetadata): string {
+  const asOf = metadata.lastUpdated?.slice(0, 10) ?? 'unknown';
+  return `_WWDC data is a bundled snapshot as of ${asOf} (version ${metadata.version}); sessions released after this date may be missing._`;
+}
+
+/**
  * List WWDC videos
  */
 export async function handleListWWDCVideos(
@@ -46,7 +58,20 @@ export async function handleListWWDCVideos(
     // Load metadata
     const metadata = await loadGlobalMetadata();
 
+    // A year with no bundled data is a filter miss, not an error: degrade to an
+    // empty result (consistent with list_technologies / get_sample_code) rather
+    // than letting loadYearIndex throw.
+    if (year && year !== 'all' && !metadata.years.includes(year)) {
+      const available = [...metadata.years].sort((a, b) => Number(b) - Number(a)).join(', ');
+      return `No WWDC videos found for year ${year}. Available years: ${available}.`;
+    }
+
     let allVideos: Array<WWDCVideo & { year: string }> = [];
+    // Tracks whether the topic index load actually succeeded. We can't re-derive
+    // this from `topic.includes('-')` later: a hyphenated topic whose index load
+    // fails must still be keyword-filtered, and a topic that legitimately matches
+    // zero videos must not silently widen to the whole catalog.
+    let usedTopicIndex = false;
 
     if (topic?.includes('-')) {
       // If topic looks like a topic ID, try to use topic index
@@ -59,33 +84,32 @@ export async function handleListWWDCVideos(
           : topicIndex.videos;
 
         // Load video data
-        const videoFiles = videosToLoad.map((v: any) => v.dataFile);
-        const videos = await loadVideosData(videoFiles);
-
-        allVideos = videos.map((v: WWDCVideo) => ({ ...v, year: v.year }));
+        const videoFiles = videosToLoad.map((v) => v.dataFile);
+        allVideos = await loadVideosData(videoFiles);
+        usedTopicIndex = true;
       } catch (error) {
         logger.warn(`Failed to load topic index for ${topic}, will search by keyword instead`);
         // Fall through to load by year and filter by keyword
       }
     }
 
-    if (allVideos.length === 0 && year && year !== 'all') {
+    if (!usedTopicIndex && year && year !== 'all') {
       // If year is specified, use year index
       const yearIndex = await loadYearIndex(year);
 
-      // 加载视频数据
-      const videoFiles = yearIndex.videos.map((v: any) => v.dataFile);
-      const videos = await loadVideosData(videoFiles);
-
-      allVideos = videos.map((v: WWDCVideo) => ({ ...v, year: v.year }));
-    } else if (allVideos.length === 0) {
-      // Load all videos - through year indices
-      const yearsToLoad = metadata.years;
+      // Load the video data
+      const videoFiles = yearIndex.videos.map((v) => v.dataFile);
+      allVideos = await loadVideosData(videoFiles);
+    } else if (!usedTopicIndex) {
+      // Load all videos through year indices, newest first, so that a later
+      // limit keeps the most recent sessions regardless of how the bundled
+      // metadata happens to order its years.
+      const yearsToLoad = [...metadata.years].sort((a, b) => Number(b) - Number(a));
 
       for (const y of yearsToLoad) {
         try {
           const yearIndex = await loadYearIndex(y);
-          const videoFiles = yearIndex.videos.map((v: any) => v.dataFile);
+          const videoFiles = yearIndex.videos.map((v) => v.dataFile);
           const videos = await loadVideosData(videoFiles);
 
           const videosWithYear = videos.map((v: WWDCVideo) => ({ ...v, year: y }));
@@ -99,18 +123,14 @@ export async function handleListWWDCVideos(
     // Apply filters
     let filteredVideos = allVideos;
 
-    // Topic filter (if not already filtered through topic index)
-    if (topic && allVideos.length > 0) {
-      // If we loaded videos but didn't use topic index, filter by keyword
+    // Topic keyword filter — only when the topic index was not used (otherwise
+    // the videos are already scoped to the topic).
+    if (topic && !usedTopicIndex) {
       const topicLower = topic.toLowerCase();
-      const wasFilteredByTopicIndex = topic.includes('-') && allVideos.length > 0;
-
-      if (!wasFilteredByTopicIndex) {
-        filteredVideos = filteredVideos.filter(v =>
-          v.topics.some(t => t.toLowerCase().includes(topicLower)) ||
-          v.title.toLowerCase().includes(topicLower),
-        );
-      }
+      filteredVideos = filteredVideos.filter(v =>
+        v.topics.some(t => t.toLowerCase().includes(topicLower)) ||
+        v.title.toLowerCase().includes(topicLower),
+      );
     }
 
     // Code filter
@@ -121,12 +141,12 @@ export async function handleListWWDCVideos(
     // Apply limit
     const limitedVideos = filteredVideos.slice(0, limit);
 
-    // Format output
+    // Format output (the freshness footer is added centrally by the dispatcher)
     return formatVideoList(limitedVideos, year, topic, hasCode);
 
   } catch (error) {
     logger.error('Failed to list WWDC videos:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to list WWDC videos: ${errorMessage}`;
   }
 }
@@ -149,8 +169,8 @@ export async function handleSearchWWDCContent(
       matches: Array<{ type: 'transcript' | 'code'; context: string; timestamp?: string }>;
     }> = [];
 
-    // Determine years to search
-    const yearsToSearch = year ? [year] : metadata.years;
+    // Determine years to search (newest first when scanning all years)
+    const yearsToSearch = year ? [year] : [...metadata.years].sort((a, b) => Number(b) - Number(a));
 
     // Search each year
     for (const y of yearsToSearch) {
@@ -171,8 +191,8 @@ export async function handleSearchWWDCContent(
           continue;
         }
 
-        // 加载视频数据
-        const videoFiles = potentialVideos.map((v: any) => v.dataFile);
+        // Load the video data
+        const videoFiles = potentialVideos.map((v) => v.dataFile);
         const videos = await loadVideosData(videoFiles);
 
         // Search each video
@@ -200,9 +220,11 @@ export async function handleSearchWWDCContent(
           }
 
           if (matches.length > 0) {
+            // Keep the full match set so ranking below reflects true relevance;
+            // the formatter slices to a display cap per video.
             results.push({
               video: { ...video, year: y },
-              matches: matches.slice(0, 3), // Max 3 matches per video
+              matches,
             });
           }
         }
@@ -221,7 +243,7 @@ export async function handleSearchWWDCContent(
 
   } catch (error) {
     logger.error('Failed to search WWDC content:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to search WWDC content: ${errorMessage}`;
   }
 }
@@ -243,7 +265,7 @@ export async function handleGetWWDCVideo(
 
   } catch (error) {
     logger.error('Failed to get WWDC video:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to get WWDC video: ${errorMessage}`;
   }
 }
@@ -270,8 +292,8 @@ export async function handleGetWWDCCodeExamples(
       year: string;
     }> = [];
 
-    // Determine years to search
-    const yearsToSearch = year ? [year] : metadata.years;
+    // Determine years to search (newest first so a later limit keeps recent code)
+    const yearsToSearch = year ? [year] : [...metadata.years].sort((a, b) => Number(b) - Number(a));
 
     for (const y of yearsToSearch) {
       try {
@@ -287,7 +309,7 @@ export async function handleGetWWDCCodeExamples(
             // If it's a standard topic ID, use topic index directly
             try {
               const topicIndex = await loadTopicIndex(topic);
-              const topicVideoIds = new Set(topicIndex.videos.map((v: any) => v.id));
+              const topicVideoIds = new Set(topicIndex.videos.map((v) => v.id));
               filteredVideos = videosWithCode.filter(v => topicVideoIds.has(v.id));
             } catch (error) {
               // If topic index doesn't exist, fallback to string matching
@@ -311,8 +333,8 @@ export async function handleGetWWDCCodeExamples(
           continue;
         }
 
-        // 加载视频数据
-        const videoFiles = filteredVideos.map((v: any) => v.dataFile);
+        // Load the video data
+        const videoFiles = filteredVideos.map((v) => v.dataFile);
         const videos = await loadVideosData(videoFiles);
 
         // Extract code examples
@@ -355,7 +377,7 @@ export async function handleGetWWDCCodeExamples(
 
   } catch (error) {
     logger.error('Failed to get WWDC code examples:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to get WWDC code examples: ${errorMessage}`;
   }
 }
@@ -369,19 +391,26 @@ function searchInTranscript(
 ): Array<{ context: string; timestamp?: string }> {
   const matches: Array<{ context: string; timestamp?: string }> = [];
   const lines = fullText.split('\n');
+  // Apple transcript "lines" are near-newline-free paragraphs — a single one can
+  // be the entire session transcript. Return a bounded window around the match
+  // rather than the whole paragraph, so a snippet stays small for the consumer.
+  const CONTEXT_RADIUS = 120;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.toLowerCase().includes(query)) {
-      // Get context (one line before and after)
-      const context = [
-        lines[i - 1] || '',
-        line,
-        lines[i + 1] || '',
-      ].filter(l => l.trim()).join(' ... ');
-
-      matches.push({ context });
+  for (const line of lines) {
+    const matchIndex = line.toLowerCase().indexOf(query);
+    if (matchIndex === -1) {
+      continue;
     }
+    const start = Math.max(0, matchIndex - CONTEXT_RADIUS);
+    const end = Math.min(line.length, matchIndex + query.length + CONTEXT_RADIUS);
+    let context = line.slice(start, end).trim();
+    if (start > 0) {
+      context = `…${context}`;
+    }
+    if (end < line.length) {
+      context = `${context}…`;
+    }
+    matches.push({ context });
   }
 
   return matches;
@@ -409,7 +438,7 @@ function searchInCode(
       const matchingLines = lines.filter(line => line.toLowerCase().includes(query));
 
       matches.push({
-        context: `[${example.language}] ${example.title || ''}: ${matchingLines[0]}`,
+        context: `[${example.language}] ${example.title ?? ''}: ${matchingLines[0]}`,
         timestamp: example.timestamp,
       });
     }
@@ -518,11 +547,13 @@ function formatSearchResults(
   content += `**Search Scope:** ${searchIn === 'code' ? 'Code' : searchIn === 'transcript' ? 'Transcript' : 'All Content'}\n`;
   content += `**Found ${results.length} related videos**\n\n`;
 
+  const MAX_DISPLAYED_MATCHES = 3;
+
   results.forEach(result => {
     content += `## [${result.video.title}](${result.video.url})\n`;
     content += `*WWDC${result.video.year} | ${result.matches.length} matches*\n\n`;
 
-    result.matches.forEach(match => {
+    result.matches.slice(0, MAX_DISPLAYED_MATCHES).forEach(match => {
       content += `**${match.type === 'code' ? 'Code' : 'Transcript'}**`;
       if (match.timestamp) {
         content += ` (${match.timestamp})`;
@@ -530,6 +561,10 @@ function formatSearchResults(
       content += '\n';
       content += `> ${match.context}\n\n`;
     });
+
+    if (result.matches.length > MAX_DISPLAYED_MATCHES) {
+      content += `_…and ${result.matches.length - MAX_DISPLAYED_MATCHES} more match(es)._\n\n`;
+    }
   });
 
   return content;
@@ -557,7 +592,10 @@ function formatVideoDetail(
     content += `**Topics:** ${video.topics.join(', ')}\n`;
   }
 
-  // Resource links
+  // Resource links — logical OR presence check across the resource fields;
+  // `??` would stop at the first non-nullish (e.g. an empty string) instead of
+  // testing the others, so `||` is correct here.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
   if (video.resources.hdVideo || video.resources.sdVideo || video.resources.resourceLinks) {
     content += '\n**Resources:**\n';
     if (video.resources.hdVideo) {
@@ -615,7 +653,7 @@ function formatVideoDetail(
 
       content += `\`\`\`${example.language}\n`;
       content += example.code;
-      content += '\n\`\`\`\n\n';
+      content += '\n```\n\n';
 
       if (example.context) {
         content += `*${example.context}*\n\n`;
@@ -688,7 +726,7 @@ function formatCodeExamples(
     content += `## ${lang.charAt(0).toUpperCase() + lang.slice(1)}\n\n`;
 
     examplesByLanguage[lang].forEach(example => {
-      content += `### ${example.title || 'Code Example'}\n`;
+      content += `### ${example.title ?? 'Code Example'}\n`;
       content += `*From: [${example.videoTitle}](${example.videoUrl}) (WWDC${example.year})*`;
 
       if (example.timestamp) {
@@ -698,7 +736,7 @@ function formatCodeExamples(
 
       content += `\`\`\`${example.language}\n`;
       content += example.code;
-      content += '\n\`\`\`\n\n';
+      content += '\n```\n\n';
     });
   });
 
@@ -803,7 +841,7 @@ export async function handleBrowseWWDCTopics(
         }
 
       } catch (error) {
-        content += `Error loading videos for topic: ${error instanceof Error ? error.message : String(error)}\n`;
+        content += `Error loading videos for topic: ${getErrorMessage(error)}\n`;
       }
     }
 
@@ -811,7 +849,7 @@ export async function handleBrowseWWDCTopics(
 
   } catch (error) {
     logger.error('Failed to browse WWDC topics:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to browse WWDC topics: ${errorMessage}`;
   }
 }
@@ -875,7 +913,7 @@ export async function handleFindRelatedWWDCVideos(
             const topicVideos = topicIndex.videos.filter(v => v.id !== videoId);
 
             // Load video data for scoring
-            const videoFiles = topicVideos.slice(0, 10).map((v: any) => v.dataFile); // Limit to avoid too many requests
+            const videoFiles = topicVideos.slice(0, 10).map((v) => v.dataFile); // Limit to avoid too many requests
             const videos = await loadVideosData(videoFiles);
 
             for (const video of videos) {
@@ -891,7 +929,7 @@ export async function handleFindRelatedWWDCVideos(
               const score = sharedTopics.length * 2;
 
               relatedVideos.push({
-                video: { ...video, year: video.year },
+                video,
                 relationship: `Same topic: ${topicEntry.name}`,
                 score,
               });
@@ -915,7 +953,7 @@ export async function handleFindRelatedWWDCVideos(
         );
 
         // Load a sample of videos
-        const videoFiles = yearVideos.slice(0, 10).map((v: any) => v.dataFile);
+        const videoFiles = yearVideos.slice(0, 10).map((v) => v.dataFile);
         const videos = await loadVideosData(videoFiles);
 
         for (const video of videos) {
@@ -980,7 +1018,7 @@ export async function handleFindRelatedWWDCVideos(
 
   } catch (error) {
     logger.error('Failed to find related WWDC videos:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to find related WWDC videos: ${errorMessage}`;
   }
 }
@@ -1001,7 +1039,7 @@ export async function handleListWWDCYears(): Promise<string> {
     }
 
     // Sort years in descending order (newest first)
-    const sortedYears = [...metadata.years].sort((a, b) => b.localeCompare(a));
+    const sortedYears = [...metadata.years].sort((a, b) => Number(b) - Number(a));
 
     content += `**Total Years:** ${sortedYears.length}\n\n`;
     content += '## Years with Video Counts\n\n';
@@ -1027,7 +1065,7 @@ export async function handleListWWDCYears(): Promise<string> {
 
   } catch (error) {
     logger.error('Failed to list WWDC years:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = getErrorMessage(error);
     return `Error: Failed to list WWDC years: ${errorMessage}`;
   }
 }

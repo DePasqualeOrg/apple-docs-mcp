@@ -1,8 +1,16 @@
-import * as cheerio from 'cheerio';
-import type { SearchResult } from './search-result-parser.js';
-import { parseSearchResult } from './search-result-parser.js';
-import { API_LIMITS } from '../utils/constants.js';
+import type { SearchResult, AppleSearchResponse } from './search-result-parser.js';
+import { mapSearchResults } from './search-result-parser.js';
+import { API_LIMITS, APPLE_URLS } from '../utils/constants.js';
+import { httpClient } from '../utils/http-client.js';
 import { logger } from '../utils/logger.js';
+
+/**
+ * Apple's developer search is backed by this JSON API (the one the
+ * developer.apple.com/search page itself calls). It returns structured results,
+ * so the tool no longer scrapes HTML. The host is internal/undocumented, so the
+ * tool degrades gracefully (see formatSearchUnavailable) if it changes.
+ */
+const SEARCH_API_URL = 'https://devintserv.msc.sbz.apple.com/api/v1/search';
 
 /**
  * Formats search results for display
@@ -63,6 +71,15 @@ function formatNoResultsMessage(query: string, filterType: string, searchUrl: st
   if (videoSuggestion) {
     content += '- For WWDC videos, use the dedicated WWDC tools\n';
   }
+
+  // An empty result can also mean the search endpoint changed or rate-limited the
+  // request — not necessarily that there are no matches. Point to the tools that
+  // address Apple's documentation directly when the framework or URL is known.
+  content += '\n### More direct than search\n';
+  content += 'If you already know the framework or page, these reach it directly:\n';
+  content += '- `get_apple_doc_content` — fetch a page when you know its URL\n';
+  content += '- `list_technologies` — browse frameworks by category\n';
+  content += '- `search_framework_symbols` — search symbols within a known framework\n';
 
   content += `\n[View search on Apple Developer](${searchUrl})`;
   return content;
@@ -188,46 +205,52 @@ This search covers documentation and samples, but not WWDC videos. For WWDC cont
 }
 
 /**
- * Parse search results with reduced complexity
+ * Message shown when the search API itself fails (network error, or Apple
+ * changed/removed the internal endpoint). Distinct from "no matches": it routes
+ * the caller to the JSON-API-backed tools that do not depend on this endpoint.
  */
-export function parseSearchResults(
-  html: string,
-  query: string,
-  searchUrl: string,
-  filterType: string = 'all',
-): { content: Array<{ type: string; text: string }> } {
-  try {
-    const $ = cheerio.load(html);
-    const results: SearchResult[] = [];
+function formatSearchUnavailable(query: string, searchUrl: string): string {
+  return `# Apple Documentation Search
 
-    // Parse each search result (with limit)
-    $('.search-result').each((_, element) => {
-      if (results.length >= API_LIMITS.MAX_SEARCH_RESULTS) {
-        return false; // Stop parsing when limit reached
-      }
-      const result = parseSearchResult($(element), filterType);
-      if (result) {
-        results.push(result);
-      }
-      return true; // Continue parsing
+Search is temporarily unavailable for "${query}". The search API may have changed or the request was rate-limited — this does not mean there are no matches.
+
+These tools query Apple's documentation JSON API directly and do not depend on the search endpoint:
+
+- **\`get_apple_doc_content\`** — fetch a page directly when you know its URL (e.g. https://developer.apple.com/documentation/swiftui/view)
+- **\`list_technologies\`** — browse frameworks by category
+- **\`search_framework_symbols\`** — search symbols within a known framework
+
+[Open this search on Apple Developer](${searchUrl})
+`;
+}
+
+/**
+ * Search Apple Developer Documentation via Apple's search JSON API and return a
+ * formatted MCP response.
+ */
+export async function fetchAppleDocsSearch(
+  query: string,
+  filterType: string = 'all',
+): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const searchUrl = `${APPLE_URLS.SEARCH}?q=${encodeURIComponent(query)}`;
+  try {
+    const data = await httpClient.postJson<AppleSearchResponse>(SEARCH_API_URL, {
+      text: query,
+      targetResultLocale: 'en',
     });
 
-    // Format results
-    const formattedContent = formatSearchResults(results, query, filterType, searchUrl);
+    const results: SearchResult[] = mapSearchResults(data, filterType).slice(
+      0,
+      API_LIMITS.MAX_SEARCH_RESULTS,
+    );
 
     return {
-      content: [{
-        type: 'text',
-        text: formattedContent,
-      }],
+      content: [{ type: 'text', text: formatSearchResults(results, query, filterType, searchUrl) }],
     };
   } catch (error) {
-    logger.error('Error parsing search results:', error);
+    logger.error('Apple search request failed:', error);
     return {
-      content: [{
-        type: 'text',
-        text: `Error parsing search results: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      }],
+      content: [{ type: 'text', text: formatSearchUnavailable(query, searchUrl) }],
     };
   }
 }

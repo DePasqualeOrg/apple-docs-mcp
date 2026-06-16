@@ -11,7 +11,9 @@ export interface PlatformInfo {
   current?: string;
   deprecated?: boolean;
   deprecatedAt?: string;
+  obsoletedAt?: string;
   beta?: boolean;
+  unavailable?: boolean;
 }
 
 /**

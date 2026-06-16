@@ -3,7 +3,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { parseSearchResults } from './tools/search-parser.js';
+import { fetchAppleDocsSearch } from './tools/search-parser.js';
 import { fetchAppleDocJson } from './tools/doc-fetcher.js';
 import { handleListTechnologies } from './tools/list-technologies.js';
 import { searchFrameworkSymbols } from './tools/search-framework-symbols.js';
@@ -16,10 +16,9 @@ import { handleFindSimilarApis } from './tools/find-similar-apis.js';
 import { handleGetDocumentationUpdates } from './tools/get-documentation-updates.js';
 import { handleGetTechnologyOverviews } from './tools/get-technology-overviews.js';
 import { handleGetSampleCode } from './tools/get-sample-code.js';
-import { APPLE_URLS } from './utils/constants.js';
 import { isValidAppleDeveloperUrl } from './utils/url-converter.js';
 import { validateInput, ErrorType, createStandardErrorResponse, createToolErrorResponse } from './utils/error-handler.js';
-import { httpClient } from './utils/http-client.js';
+import type { AppError } from './utils/error-handler.js';
 import { preloadPopularFrameworks } from './utils/preloader.js';
 import { warmUpCaches, schedulePeriodicCacheRefresh } from './utils/cache-warmer.js';
 import { logger } from './utils/logger.js';
@@ -48,7 +47,7 @@ export default class AppleDeveloperDocsMCPServer {
     } catch (error) {
       // If error is already an AppError, use tool-specific suggestions
       if (error && typeof error === 'object' && 'type' in error) {
-        return createToolErrorResponse(error as any, operationName);
+        return createToolErrorResponse(error as AppError, operationName);
       }
       return createStandardErrorResponse(error, operationName);
     }
@@ -74,14 +73,14 @@ export default class AppleDeveloperDocsMCPServer {
   private setupTools() {
     // const cacheStatsSchema = z.object({});
 
-    // 处理工具列表请求
+    // Handle list-tools requests
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: toolDefinitions,
       };
     });
 
-    // 处理工具调用请求
+    // Handle tool-call requests
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
@@ -109,25 +108,19 @@ export default class AppleDeveloperDocsMCPServer {
 
   public async searchAppleDocs(query: string, type: string = 'all') {
     try {
-      // 输入验证
+      // Input validation
       const queryValidation = validateInput(query, 'Search query');
       if (queryValidation) {
         return createToolErrorResponse(queryValidation, 'search_apple_docs');
       }
 
-      // 创建 Apple Developer Documentation 搜索 URL
-      const searchUrl = `${APPLE_URLS.SEARCH}?q=${encodeURIComponent(query)}`;
-
       logger.info(`Searching Apple docs for: ${query}`);
 
-      // 获取搜索结果页面
-      const html = await httpClient.getText(searchUrl);
-
-      // 解析并返回搜索结果，传递type参数进行过滤
-      return parseSearchResults(html, query, searchUrl, type);
+      // Query Apple's search JSON API and return formatted results.
+      return await fetchAppleDocsSearch(query, type);
     } catch (error) {
       if (error && typeof error === 'object' && 'type' in error) {
-        return createToolErrorResponse(error as any, 'search_apple_docs');
+        return createToolErrorResponse(error as AppError, 'search_apple_docs');
       }
       return createStandardErrorResponse(error, 'search_apple_docs');
     }
@@ -141,13 +134,13 @@ export default class AppleDeveloperDocsMCPServer {
     includePlatformAnalysis: boolean = false,
   ) {
     try {
-      // 输入验证
+      // Input validation
       const urlValidation = validateInput(url, 'URL');
       if (urlValidation) {
         return createToolErrorResponse(urlValidation, 'get_apple_doc_content');
       }
 
-      // 验证是否为有效的Apple Developer URL
+      // Validate that this is a real Apple Developer URL
       if (!isValidAppleDeveloperUrl(url)) {
         return createToolErrorResponse({
           type: ErrorType.INVALID_INPUT,
@@ -155,7 +148,7 @@ export default class AppleDeveloperDocsMCPServer {
         }, 'get_apple_doc_content');
       }
 
-      // fetchAppleDocJson 已经返回正确的MCP响应格式，直接返回
+      // fetchAppleDocJson already returns the correct MCP response format, so return it directly
       return await fetchAppleDocJson(url, {
         includeRelatedApis,
         includeReferences,
@@ -164,7 +157,7 @@ export default class AppleDeveloperDocsMCPServer {
       });
     } catch (error) {
       if (error && typeof error === 'object' && 'type' in error) {
-        return createToolErrorResponse(error as any, 'get_apple_doc_content');
+        return createToolErrorResponse(error as AppError, 'get_apple_doc_content');
       }
       return createStandardErrorResponse(error, 'get_apple_doc_content');
     }
@@ -243,13 +236,12 @@ export default class AppleDeveloperDocsMCPServer {
 
   public async getTechnologyOverviews(
     category?: string,
-    platform: string = 'all',
     searchQuery?: string,
     includeSubcategories: boolean = true,
     limit: number = API_LIMITS.DEFAULT_TECHNOLOGY_OVERVIEWS_LIMIT,
   ) {
     return this.handleAsyncOperation(
-      () => handleGetTechnologyOverviews(category, platform, searchQuery, includeSubcategories, limit),
+      () => handleGetTechnologyOverviews(category, searchQuery, includeSubcategories, limit),
       'getTechnologyOverviews',
     );
   }
@@ -267,7 +259,7 @@ export default class AppleDeveloperDocsMCPServer {
   }
 
   private setupErrorHandling() {
-    // 处理 SIGINT 以优雅关闭服务器
+    // Handle SIGINT to shut down the server gracefully
     process.on('SIGINT', () => {
       process.exit(0);
     });
@@ -296,16 +288,21 @@ export default class AppleDeveloperDocsMCPServer {
     logger.info('Cache system initialized with TTL: API(30m), Index(1h), Technologies(2h)');
     logger.info('Note: Search results are not cached to ensure real-time accuracy');
 
-    // Start framework preloading and cache warming in background
-    Promise.all([
-      preloadPopularFrameworks(),
-      warmUpCaches(),
-    ]).catch(error => {
-      logger.error('Background initialization failed:', error);
-    });
+    // Optional background preloading + cache warming. Off by default: this is a
+    // per-session stdio server (often launched via npx), so issuing ~15
+    // speculative requests on every launch before the user asks for anything is
+    // wasteful. Opt in with APPLE_DOCS_PRELOAD=true for long-lived deployments.
+    if (process.env.APPLE_DOCS_PRELOAD === 'true') {
+      Promise.all([
+        preloadPopularFrameworks(),
+        warmUpCaches(),
+      ]).catch(error => {
+        logger.error('Background initialization failed:', error);
+      });
 
-    // Schedule periodic cache refresh (every 30 minutes)
-    schedulePeriodicCacheRefresh();
+      // Schedule periodic cache refresh (every 30 minutes)
+      schedulePeriodicCacheRefresh();
+    }
   }
 }
 

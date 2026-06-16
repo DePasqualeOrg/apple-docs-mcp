@@ -1,0 +1,12 @@
+# Keep the build context small and never copy host-built artifacts into the
+# image. Dependencies are installed inside the image; node_modules and the pnpm
+# store live in named volumes at runtime.
+node_modules
+.pnpm-store
+dist
+coverage
+.git
+.DS_Store
+*.log
+.env
+.env.local

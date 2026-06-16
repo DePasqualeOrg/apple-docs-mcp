@@ -13,9 +13,6 @@ jest.mock('../src/utils/wwdc-data-source.js', () => ({
   loadTopicIndex: jest.fn(),
   loadYearIndex: jest.fn(),
   loadVideoData: jest.fn(),
-  loadAllVideos: jest.fn(),
-  clearDataCache: jest.fn(),
-  isDataAvailable: jest.fn().mockResolvedValue(true),
 }));
 
 import AppleDeveloperDocsMCPServer from '../src/index.js';
@@ -23,10 +20,26 @@ import AppleDeveloperDocsMCPServer from '../src/index.js';
 // Mock external dependencies
 jest.mock('../src/utils/http-client.js', () => ({
   httpClient: {
-    getText: jest.fn().mockResolvedValue('<html><body><ul class="search-results"></ul></body></html>'),
+    getText: jest.fn().mockResolvedValue(''),
+    getJson: jest.fn().mockResolvedValue({}),
     get: jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({})
+    }),
+    postJson: jest.fn().mockResolvedValue({
+      results: [
+        {
+          documentation: {
+            metadata: {
+              title: 'SwiftUI',
+              permalink: 'https://developer.apple.com/documentation/swiftui',
+              description: 'A declarative framework for building user interfaces.',
+              hierarchy: 'SwiftUI',
+              kind: 'symbol',
+            },
+          },
+        },
+      ],
     })
   }
 }));
@@ -215,14 +228,16 @@ describe('Response Format Validation', () => {
     });
 
     it('should handle network errors with proper format', async () => {
-      // Mock network failure
+      // Mock search API failure. Search degrades gracefully: it returns a
+      // well-formed response with guidance toward the JSON-API tools rather than
+      // flagging isError, so the model still gets something actionable.
       const { httpClient } = await import('../src/utils/http-client.js');
-      (httpClient.getText as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+      (httpClient.postJson as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
 
       const response = await server.searchAppleDocs('SwiftUI', 'all');
-      
+
       validateResponseFormat(response);
-      expect(response.isError).toBe(true);
+      expect(response.content[0].text).toContain('Search is temporarily unavailable');
     });
   });
 
@@ -336,21 +351,30 @@ describe('Response Format Validation', () => {
       expect(responseText.length).toBeGreaterThan(10); // Not empty
     });
 
-    it('should handle large responses gracefully', async () => {
-      // Mock a large response
-      const largeHtml = '<html><body><ul class="search-results">' + 
-        '<li class="search-result">'.repeat(100) +
-        '<article><h1>Test Result</h1><p>Description</p></article></li>'.repeat(100) +
-        '</ul></body></html>';
-      
+    it('should cap large result sets at MAX_SEARCH_RESULTS', async () => {
+      // Search posts to the JSON API and slices to API_LIMITS.MAX_SEARCH_RESULTS
+      // (50). Feed it 100 results and assert the cap is enforced, so a regression
+      // that renders the full upstream set would fail here.
+      const manyResults = Array.from({ length: 100 }, (_, i) => ({
+        documentation: {
+          metadata: {
+            title: `Result ${i}`,
+            permalink: `https://developer.apple.com/documentation/swiftui/result${i}`,
+            description: `Description ${i}`,
+            hierarchy: 'SwiftUI',
+            kind: 'symbol',
+          },
+        },
+      }));
+
       const { httpClient } = await import('../src/utils/http-client.js');
-      (httpClient.getText as jest.Mock).mockResolvedValueOnce(largeHtml);
+      (httpClient.postJson as jest.Mock).mockResolvedValueOnce({ results: manyResults });
 
       const response = await server.searchAppleDocs('SwiftUI', 'all');
-      
+
       validateResponseFormat(response);
-      // Should handle large responses without breaking format
-      expect(response.content[0].text).toBeDefined();
+      // The formatter reports the count it actually rendered; it must be capped at 50.
+      expect(response.content[0].text).toContain('**Results found:** 50');
     });
   });
 });

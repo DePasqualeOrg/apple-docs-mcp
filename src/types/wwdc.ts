@@ -1,17 +1,17 @@
 /**
- * WWDC视频数据类型定义
+ * WWDC video data type definitions
  */
 
 /**
- * Transcript段落
+ * Transcript segment
  */
 export interface TranscriptSegment {
-  timestamp: string;  // "00:00" 格式
+  timestamp: string;  // "00:00" format
   text: string;
 }
 
 /**
- * Transcript数据
+ * Transcript data
  */
 export interface TranscriptData {
   fullText: string;
@@ -19,18 +19,18 @@ export interface TranscriptData {
 }
 
 /**
- * 代码示例
+ * Code example
  */
 export interface CodeExample {
-  timestamp?: string;  // "05:30" 格式，可能没有
-  title?: string;      // 代码标题或描述
-  language: string;    // "swift", "objc", "javascript" 等
-  code: string;        // 代码内容
-  context?: string;    // 代码上下文说明
+  timestamp?: string;  // "05:30" format, may be absent
+  title?: string;      // Code title or description
+  language: string;    // "swift", "objc", "javascript", etc.
+  code: string;        // Code content
+  context?: string;    // Code context description
 }
 
 /**
- * 资源链接
+ * Resource link
  */
 export interface ResourceLink {
   title: string;
@@ -38,18 +38,18 @@ export interface ResourceLink {
 }
 
 /**
- * 视频资源
+ * Video resources
  */
 export interface VideoResources {
-  hdVideo?: string;        // HD视频下载链接
-  sdVideo?: string;        // SD视频下载链接
-  sampleProject?: string;  // 示例项目下载链接
-  slides?: string;         // 演示文稿下载链接
-  resourceLinks?: ResourceLink[];  // 资源链接
+  hdVideo?: string;        // HD video download link
+  sdVideo?: string;        // SD video download link
+  sampleProject?: string;  // Sample project download link
+  slides?: string;         // Slides download link
+  resourceLinks?: ResourceLink[];  // Resource links
 }
 
 /**
- * 相关视频
+ * Related video
  */
 export interface RelatedVideo {
   id: string;
@@ -59,28 +59,28 @@ export interface RelatedVideo {
 }
 
 /**
- * WWDC视频数据
+ * WWDC video data
  */
 export interface WWDCVideo {
-  id: string;              // 视频ID，如 "238"
-  year: string;            // 年份，如 "2025"
-  url: string;             // 完整URL
-  title: string;           // 视频标题
-  speakers?: string[];     // 演讲者列表
-  duration: string;        // 时长，如 "15:30"
-  topics: string[];        // 主题标签（标准分类）
-  hasTranscript: boolean;  // 是否有transcript
-  hasCode: boolean;        // 是否有代码示例
+  id: string;              // Video ID, e.g. "238"
+  year: string;            // Year, e.g. "2025"
+  url: string;             // Full URL
+  title: string;           // Video title
+  speakers?: string[];     // List of speakers
+  duration: string;        // Duration, e.g. "15:30"
+  topics: string[];        // Topic tags (standard categories)
+  hasTranscript: boolean;  // Whether a transcript is available
+  hasCode: boolean;        // Whether code examples are available
   transcript?: TranscriptData;
   codeExamples?: CodeExample[];
-  chapters?: Chapter[];    // 章节信息
+  chapters?: Chapter[];    // Chapter info
   resources: VideoResources;
-  relatedVideos?: RelatedVideo[];  // 相关视频
-  extractedAt?: string;    // 提取时间 ISO 8601
+  relatedVideos?: RelatedVideo[];  // Related videos
+  extractedAt?: string;    // Extraction time, ISO 8601
 }
 
 /**
- * 视频章节
+ * Video chapter
  */
 export interface Chapter {
   title: string;
@@ -89,18 +89,18 @@ export interface Chapter {
 }
 
 /**
- * 年份元数据
+ * Year metadata
  */
 export interface YearMetadata {
   year: string;
   totalVideos: number;
-  hasCodeTab: boolean;     // 该年份是否有独立的Code标签页
+  hasCodeTab: boolean;     // Whether this year has a separate Code tab
   extractedAt: string;
   lastUpdated?: string;
 }
 
 /**
- * WWDC年份数据
+ * WWDC year data
  */
 export interface WWDCYearData {
   metadata: YearMetadata;
@@ -108,7 +108,7 @@ export interface WWDCYearData {
 }
 
 /**
- * 全局元数据
+ * Global metadata
  */
 export interface GlobalMetadata {
   version: string;
@@ -130,7 +130,7 @@ export interface GlobalMetadata {
 }
 
 /**
- * 主题索引
+ * Topic index
  */
 export interface TopicIndex {
   id: string;
@@ -151,7 +151,7 @@ export interface TopicIndex {
 }
 
 /**
- * 年份索引
+ * Year index
  */
 export interface YearIndex {
   year: string;
@@ -171,7 +171,7 @@ export interface YearIndex {
 }
 
 /**
- * 完整的WWDC数据集
+ * The complete WWDC dataset
  */
 export interface WWDCDataset {
   wwdc: Record<string, WWDCYearData>;
@@ -179,7 +179,7 @@ export interface WWDCDataset {
 }
 
 /**
- * 视频列表项（用于列表页提取）
+ * Video list item (used for list-page extraction)
  */
 export interface VideoListItem {
   id: string;
@@ -190,18 +190,18 @@ export interface VideoListItem {
 }
 
 /**
- * 提取配置
+ * Extraction config
  */
 export interface ExtractorConfig {
   year: string;
-  concurrency?: number;    // 并发数，默认5
-  retryAttempts?: number;  // 重试次数，默认3
-  timeout?: number;        // 超时时间（毫秒）
-  skipExisting?: boolean;  // 跳过已存在的视频
+  concurrency?: number;    // Concurrency, default 5
+  retryAttempts?: number;  // Retry attempts, default 3
+  timeout?: number;        // Timeout in milliseconds
+  skipExisting?: boolean;  // Skip videos that already exist
 }
 
 /**
- * 提取进度
+ * Extraction progress
  */
 export interface ExtractProgress {
   total: number;

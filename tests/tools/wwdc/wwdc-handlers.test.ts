@@ -17,9 +17,6 @@ jest.mock('../../../src/utils/wwdc-data-source', () => ({
   loadTopicIndex: jest.fn(),
   loadYearIndex: jest.fn(),
   loadVideoData: jest.fn(),
-  loadAllVideos: jest.fn(),
-  clearDataCache: jest.fn(),
-  isDataAvailable: jest.fn(),
 }));
 
 import {
@@ -27,14 +24,12 @@ import {
   loadTopicIndex,
   loadYearIndex,
   loadVideoData,
-  loadAllVideos,
 } from '../../../src/utils/wwdc-data-source';
 
 const mockLoadGlobalMetadata = loadGlobalMetadata as jest.MockedFunction<typeof loadGlobalMetadata>;
 const mockLoadTopicIndex = loadTopicIndex as jest.MockedFunction<typeof loadTopicIndex>;
 const mockLoadYearIndex = loadYearIndex as jest.MockedFunction<typeof loadYearIndex>;
 const mockLoadVideoData = loadVideoData as jest.MockedFunction<typeof loadVideoData>;
-const mockLoadAllVideos = loadAllVideos as jest.MockedFunction<typeof loadAllVideos>;
 
 // Helper to convert video ID to file path
 const videoIdToPath = (id: string, year: string = '2025') => `videos/${year}-${id}.json`;
@@ -135,7 +130,8 @@ describe('WWDC Handlers', () => {
         topicId: 'machine-learning-ai',
         name: 'Machine Learning & AI',
         videoCount: 1,
-        videos: [{ id: '10188', year: '2025', dataFile: 'videos/10188.json' }],
+        // dataFile must carry the YYYY- prefix so loadVideosData can resolve it.
+        videos: [{ id: '10188', year: '2025', dataFile: 'videos/2025-10188.json' }],
       };
 
       mockLoadTopicIndex.mockResolvedValue(mockTopicIndex);
@@ -145,6 +141,29 @@ describe('WWDC Handlers', () => {
       expect(result).toContain('Machine Learning & AI');
       expect(result).toContain('Meet the Translation API');
       expect(mockLoadTopicIndex).toHaveBeenCalledWith('machine-learning-ai');
+    });
+
+    test('does not widen to the whole catalog when a topic matches no loadable videos', async () => {
+      // The topic index loads successfully but yields no resolvable videos. The
+      // handler must return empty rather than silently falling back to all years.
+      mockLoadTopicIndex.mockResolvedValue({
+        topicId: 'machine-learning-ai',
+        name: 'Machine Learning & AI',
+        videoCount: 0,
+        videos: [],
+      });
+      const yearSpy = mockLoadYearIndex.mockResolvedValue({
+        year: '2025',
+        videoCount: 1,
+        videos: [{ id: '10188', year: '2025', title: 'Meet the Translation API', topics: ['Machine Learning & AI'], duration: '15 min', hasCode: true, hasTranscript: true, dataFile: 'videos/2025-10188.json', url: 'https://developer.apple.com/videos/play/wwdc2025/10188/' }],
+      });
+
+      const result = await handleListWWDCVideos(undefined, 'machine-learning-ai');
+
+      expect(result).toContain('No WWDC videos found');
+      expect(result).not.toContain('Meet the Translation API');
+      // The topic index was used, so the all-years fallback must not run.
+      expect(yearSpy).not.toHaveBeenCalled();
     });
 
     test('should filter videos by code availability', async () => {
@@ -180,6 +199,18 @@ describe('WWDC Handlers', () => {
 
       expect(result).toContain('Error: Failed to list WWDC videos');
       expect(result).toContain('Failed to load metadata');
+    });
+
+    test('returns a graceful empty result for an unknown year (not an error)', async () => {
+      mockLoadGlobalMetadata.mockResolvedValue(mockMetadata);
+
+      const result = await handleListWWDCVideos('1999');
+
+      // A year with no bundled data is a filter miss, not an error.
+      expect(result).not.toContain('Error:');
+      expect(result).toContain('No WWDC videos found for year 1999');
+      expect(result).toContain('2025'); // lists available years
+      expect(mockLoadYearIndex).not.toHaveBeenCalled();
     });
   });
 
@@ -263,6 +294,26 @@ describe('WWDC Handlers', () => {
       expect(result).toContain('Meet the Translation API');
       expect(result).toContain('async await patterns');
       expect(mockLoadVideoData).toHaveBeenCalled();
+    });
+
+    test('bounds transcript snippets to a window around the match (no whole-paragraph dump)', async () => {
+      // Apple transcripts are near-newline-free paragraphs; a naive "whole line"
+      // context would emit the entire transcript per match. Marker words sit far
+      // (>1000 chars) from the needle, so a bounded window must exclude them.
+      const longParagraph =
+        'STARTMARKER ' + 'lorem ipsum dolor sit amet '.repeat(40) +
+        'the special needle phrase appears here ' +
+        'consectetur adipiscing elit '.repeat(40) + 'ENDMARKER';
+      const longVideo = { ...mockSearchVideo, transcript: { fullText: longParagraph, segments: [] } };
+      mockLoadVideoData.mockImplementation((_year: string, videoId: string) =>
+        videoId === '10188' ? Promise.resolve(longVideo) : Promise.reject(new Error('Video not found')));
+
+      const result = await handleSearchWWDCContent('special needle phrase', 'transcript');
+
+      expect(result).toContain('appears here'); // text adjacent to the match is kept
+      expect(result).toContain('…');            // snippet is truncated on at least one side
+      expect(result).not.toContain('STARTMARKER'); // far-away paragraph text is dropped
+      expect(result).not.toContain('ENDMARKER');
     });
 
     test('should search in code examples', async () => {

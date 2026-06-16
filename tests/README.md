@@ -6,27 +6,20 @@ This directory contains comprehensive tests for the Apple Docs MCP server.
 
 ```
 tests/
-├── helpers/                # Test utilities and helpers
-│   └── test-helpers.ts    # Common test data and utility functions
-├── mocks/                 # Mock modules
-│   ├── cache.mock.ts      # Cache system mocks
-│   └── http-client.mock.ts # HTTP client mocks
-├── tools/                 # Unit tests for tools
-│   ├── search-framework-symbols.test.ts
-│   ├── search-parser.test.ts
-│   └── doc-fetcher.test.ts
-├── integration/           # Integration tests
-│   ├── mcp-server.test.ts # MCP server integration tests
-│   └── search.test.ts    # Search functionality tests
-├── e2e/                   # End-to-end tests
-│   └── full-workflow.test.ts
-├── utils/                 # Utility tests
-│   ├── error-handler.test.ts
-│   ├── http-client.test.ts
-│   └── url-converter.test.ts
-├── basic.test.ts          # Basic test suite
-└── setup.ts              # Jest setup file
+├── helpers/        # Shared test data and helpers (test-helpers.ts)
+├── mocks/          # Reusable module mocks (cache, http-client)
+├── fixtures/       # Captured real API/JSON responses used by tests
+├── tools/          # Per-tool tests (incl. tools/wwdc/ for the WWDC handlers)
+├── utils/          # Utility tests (cache, http-client, url-converter, etc.)
+├── regression/     # Regression tests guarding specific past bugs
+├── response-format.test.ts  # Cross-tool MCP response-shape checks
+├── index.test.ts            # Server surface checks
+└── setup.ts                 # Jest setup
 ```
+
+All tests are hermetic: `setup.ts` replaces `global.fetch` with a Jest mock, so
+no test reaches the network. Tests drive behavior through mocked
+`fetch`/`httpClient` responses or captured fixtures.
 
 ## Running Tests
 
@@ -47,6 +40,12 @@ pnpm test -- --watch
 pnpm test -- --verbose
 ```
 
+These tests mock the network for determinism. To exercise the built server against the **live** Apple API (all 18 tools, scanned for rough edges), run the separate real-world check — it is not part of `pnpm test` and needs network egress:
+
+```bash
+pnpm run check:live   # see scripts/realworld-check.mjs and CLAUDE.md
+```
+
 ## Test Coverage Areas
 
 ### 1. Unit Tests
@@ -57,14 +56,9 @@ pnpm test -- --verbose
   - Input validation
   - Cache behavior
 
-### 2. Integration Tests
-- **MCP Server**: Tests the server lifecycle and request handling
-- **Tool Integration**: Tests tools working together
-
-### 3. End-to-End Tests
-- **Full Workflows**: Tests complete user scenarios
-- **Error Recovery**: Tests error handling and recovery
-- **Performance**: Tests concurrent request handling
+### 2. Cross-tool & regression
+- **Response format**: `response-format.test.ts` checks every tool returns a valid MCP shape
+- **Regression**: `regression/` guards specific past bugs (e.g. nested responses, dropped enum cases)
 
 ## Key Test Patterns
 

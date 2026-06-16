@@ -4,12 +4,7 @@
 
 import {
   normalizeFrameworkName,
-  getFrameworkAliases,
-  isValidFramework,
   getFrameworksByCategory,
-  getFrameworkCategory,
-  searchFrameworks,
-  getFrameworkInfo,
   FRAMEWORK_MAPPINGS,
   FRAMEWORK_CATEGORIES,
 } from '../../src/utils/framework-mapper.js';
@@ -52,47 +47,6 @@ describe('Framework Mapper', () => {
     });
   });
 
-  describe('getFrameworkAliases', () => {
-    it('should return aliases for known frameworks', () => {
-      const aliases = getFrameworkAliases('SwiftUI');
-      expect(aliases).toContain('swiftui');
-      expect(aliases).toContain('swift-ui');
-      expect(aliases).toContain('swift_ui');
-    });
-
-    it('should return empty array for unknown frameworks', () => {
-      expect(getFrameworkAliases('UnknownFramework')).toEqual([]);
-    });
-
-    it('should work with normalized names', () => {
-      const aliases = getFrameworkAliases('swiftui');
-      expect(aliases).toContain('swiftui');
-    });
-  });
-
-  describe('isValidFramework', () => {
-    it('should return true for valid frameworks', () => {
-      expect(isValidFramework('swiftui')).toBe(true);
-      expect(isValidFramework('SwiftUI')).toBe(true);
-      expect(isValidFramework('core-data')).toBe(true);
-      expect(isValidFramework('Foundation')).toBe(true);
-    });
-
-    it('should return false for invalid frameworks', () => {
-      expect(isValidFramework('unknownframework')).toBe(false);
-      expect(isValidFramework('')).toBe(false);
-      // @ts-expect-error Testing invalid input
-      expect(isValidFramework(null)).toBe(false);
-      // @ts-expect-error Testing invalid input
-      expect(isValidFramework(undefined)).toBe(false);
-    });
-
-    it('should handle edge cases', () => {
-      expect(isValidFramework('   ')).toBe(false);
-      expect(isValidFramework('123')).toBe(false);
-    });
-  });
-
   describe('getFrameworksByCategory', () => {
     it('should return frameworks for valid categories', () => {
       const uiFrameworks = getFrameworksByCategory('UI');
@@ -109,80 +63,6 @@ describe('Framework Mapper', () => {
     it('should return empty array for invalid categories', () => {
       // @ts-expect-error Testing invalid category
       expect(getFrameworksByCategory('InvalidCategory')).toEqual([]);
-    });
-  });
-
-  describe('getFrameworkCategory', () => {
-    it('should return correct category for known frameworks', () => {
-      expect(getFrameworkCategory('SwiftUI')).toBe('UI');
-      expect(getFrameworkCategory('swiftui')).toBe('UI');
-      expect(getFrameworkCategory('Core Data')).toBe('Data');
-      expect(getFrameworkCategory('arkit')).toBe('Games');
-      expect(getFrameworkCategory('Foundation')).toBe('Foundation');
-    });
-
-    it('should return null for unknown frameworks', () => {
-      expect(getFrameworkCategory('UnknownFramework')).toBeNull();
-      expect(getFrameworkCategory('')).toBeNull();
-    });
-  });
-
-  describe('searchFrameworks', () => {
-    it('should find frameworks by partial name', () => {
-      const results = searchFrameworks('swift');
-      expect(results).toContain('SwiftUI');
-      expect(results).toContain('Swift');
-
-      const coreResults = searchFrameworks('core');
-      expect(coreResults).toContain('Core Data');
-      expect(coreResults).toContain('Core Graphics');
-      expect(coreResults).toContain('Core Animation');
-    });
-
-    it('should handle case insensitive search', () => {
-      const results = searchFrameworks('SWIFT');
-      expect(results).toContain('SwiftUI');
-      expect(results).toContain('Swift');
-    });
-
-    it('should return empty array for invalid input', () => {
-      expect(searchFrameworks('')).toEqual([]);
-      // @ts-expect-error Testing invalid input
-      expect(searchFrameworks(null)).toEqual([]);
-      expect(searchFrameworks('xyz123notfound')).toEqual([]);
-    });
-
-    it('should return sorted results', () => {
-      const results = searchFrameworks('kit');
-      expect(results).toBeTruthy();
-      // Check that results are sorted
-      const sorted = [...results].sort();
-      expect(results).toEqual(sorted);
-    });
-  });
-
-  describe('getFrameworkInfo', () => {
-    it('should return complete info for valid frameworks', () => {
-      const info = getFrameworkInfo('swiftui');
-      expect(info.canonical).toBe('SwiftUI');
-      expect(info.category).toBe('UI');
-      expect(info.isValid).toBe(true);
-      expect(info.aliases).toContain('swiftui');
-    });
-
-    it('should handle unknown frameworks gracefully', () => {
-      const info = getFrameworkInfo('unknownframework');
-      expect(info.canonical).toBe('Unknownframework');
-      expect(info.category).toBeNull();
-      expect(info.isValid).toBe(false);
-      expect(info.aliases).toEqual([]);
-    });
-
-    it('should work with canonical names', () => {
-      const info = getFrameworkInfo('Foundation');
-      expect(info.canonical).toBe('Foundation');
-      expect(info.category).toBe('Foundation');
-      expect(info.isValid).toBe(true);
     });
   });
 
@@ -235,14 +115,6 @@ describe('Framework Mapper', () => {
 
       testCases.forEach(({ input, expected }) => {
         expect(normalizeFrameworkName(input)).toBe(expected);
-      });
-    });
-
-    it('should maintain consistency between search and normalize', () => {
-      const searchResults = searchFrameworks('data');
-      searchResults.forEach(framework => {
-        const normalized = normalizeFrameworkName(framework.toLowerCase());
-        expect(normalized).toBe(framework);
       });
     });
   });
