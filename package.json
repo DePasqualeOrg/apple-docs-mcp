@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "data",
     "README.md",
     "README.*.md",
     "LICENSE"

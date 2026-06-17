@@ -4,10 +4,19 @@
  */
 
 import path from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 /**
- * Get the WWDC data directory path
+ * Get the WWDC data directory path.
+ *
+ * Supports two on-disk layouts:
+ * - npm/build layout: `pnpm run build` copies `data/` into `dist/`, so from the
+ *   compiled file at `dist/utils/` the data sits at `../data`.
+ * - git-checkout layout (e.g. installed via `npx github:…`, where only the
+ *   compiled JS is committed under `dist/`): the tracked `data/` stays at the
+ *   package root, i.e. `../../data` from `dist/utils/`. `data` is listed in
+ *   package.json `files` so it ships with that install too.
  */
 export function getWWDCDataDirectory(): string {
   // In test environment, use current working directory
@@ -15,11 +24,13 @@ export function getWWDCDataDirectory(): string {
     return path.resolve(process.cwd(), 'data/wwdc');
   }
 
-  // In production, use import.meta.url
   const currentFilePath = fileURLToPath(import.meta.url);
   const currentDirPath = path.dirname(currentFilePath);
 
-  // After build, data is copied to dist/data
-  // The compiled JS is in dist/utils/, so data is at ../data
-  return path.resolve(currentDirPath, '../data/wwdc');
+  // Prefer data bundled into dist/ by the build; fall back to package-root data/.
+  const bundled = path.resolve(currentDirPath, '../data/wwdc');
+  if (existsSync(bundled)) {
+    return bundled;
+  }
+  return path.resolve(currentDirPath, '../../data/wwdc');
 }
