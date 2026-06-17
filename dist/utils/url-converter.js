@@ -1,0 +1,92 @@
+/**
+ * URL conversion utilities for Apple Developer Documentation
+ */
+/**
+ * Convert a web URL to a JSON API URL
+ * @param webUrl The web URL to convert
+ * @returns The corresponding JSON API URL
+ */
+export function convertToJsonApiUrl(webUrl) {
+    try {
+        // Remove trailing slash if present
+        if (webUrl.endsWith('/')) {
+            webUrl = webUrl.slice(0, -1);
+        }
+        // Extract the path from the URL
+        const urlObj = new URL(webUrl);
+        // Check if it's an Apple Developer URL
+        if (urlObj.hostname !== 'developer.apple.com') {
+            return null;
+        }
+        let path = urlObj.pathname;
+        // For documentation URLs, format for the JSON API
+        if (path.includes('/documentation/')) {
+            // Remove /documentation/ prefix
+            path = path.replace('/documentation/', '');
+            // Convert to JSON API URL format
+            return `https://developer.apple.com/tutorials/data/documentation/${path}.json`;
+        }
+        // For tutorial URLs, try to format for the JSON API
+        if (path.includes('/tutorials/')) {
+            // Try to convert tutorials URL to JSON API format
+            // Remove /tutorials/ prefix and add .json
+            const tutorialPath = path.replace('/tutorials/', '');
+            return `https://developer.apple.com/tutorials/data/${tutorialPath}.json`;
+        }
+        // Unrecognized path on an Apple host (e.g. /news/, /videos/): there is no
+        // JSON API equivalent, so return null. Callers treat null as "not a
+        // documentation URL" and fail fast, rather than fetching an HTML page and
+        // erroring on JSON.parse.
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Build an absolute developer.apple.com URL from a reference's `url` field.
+ *
+ * Apple's `references` map normally stores site-relative paths (e.g.
+ * `/documentation/swiftui/view`), so the common case is to prepend the host.
+ * An already-absolute URL is returned unchanged, which prevents producing a
+ * malformed `https://developer.apple.com/https://…` if Apple ever emits one.
+ * Missing or empty input yields `fallback` (default `'#'`).
+ *
+ * @param url The reference URL (relative path or absolute), if present
+ * @param fallback Value to return when `url` is missing/empty
+ */
+export function toAbsoluteAppleUrl(url, fallback = '#') {
+    if (!url) {
+        return fallback;
+    }
+    return url.startsWith('http') ? url : `https://developer.apple.com${url}`;
+}
+/**
+ * Validate if URL is from Apple Developer domain
+ * @param url The URL to validate
+ * @returns True if valid Apple Developer URL
+ */
+export function isValidAppleDeveloperUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.hostname === 'developer.apple.com';
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Extract API name from URL
+ * @param url The URL to extract name from
+ * @returns The API name
+ */
+export function extractApiNameFromUrl(url) {
+    try {
+        // filter(Boolean) drops empty segments so a trailing slash doesn't yield ''.
+        return new URL(url).pathname.split('/').filter(Boolean).pop() ?? 'Unknown API';
+    }
+    catch {
+        return 'Unknown API';
+    }
+}
+//# sourceMappingURL=url-converter.js.map
