@@ -17,7 +17,7 @@ Reviewed, hardened, and tested end-to-end. All 18 tools have been driven against
 
 ## Verify
 
-All commands run in the dev container (see `CLAUDE.md`):
+All commands run in the dev container (see `AGENTS.md`):
 
 ```sh
 scripts/dx pnpm exec tsc --noEmit   # types

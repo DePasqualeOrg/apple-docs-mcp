@@ -139,7 +139,7 @@ scripts/dx pnpm test           # Jest (467 tests)
 scripts/dx pnpm run lint       # eslint
 ```
 
-The image builds from the shared `devcontainer-base` image (sibling `devcontainer-base` project, `./build.sh`). See `CLAUDE.md` for details. There are no forwarded ports — this is an MCP stdio server.
+The image builds from the shared `devcontainer-base` image (sibling `devcontainer-base` project, `./build.sh`). See `AGENTS.md` for details. There are no forwarded ports — this is an MCP stdio server.
 
 ## Practical guidance
 

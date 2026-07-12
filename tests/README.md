@@ -43,7 +43,7 @@ pnpm test -- --verbose
 These tests mock the network for determinism. To exercise the built server against the **live** Apple API (all 18 tools, scanned for rough edges), run the separate real-world check — it is not part of `pnpm test` and needs network egress:
 
 ```bash
-pnpm run check:live   # see scripts/realworld-check.mjs and CLAUDE.md
+pnpm run check:live   # see scripts/realworld-check.mjs and AGENTS.md
 ```
 
 ## Test Coverage Areas
