@@ -7,7 +7,7 @@ How the DePasqualeOrg fork is delivered to Codex and Claude Code projects, and t
 Projects run the fork from an immutable package tarball stored in the GitHub repository, without using the npm registry:
 
 ```
-npx --yes --ignore-scripts --allow-remote=root https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
+npx --yes --ignore-scripts --allow-remote=root --no-audit --no-fund --no-update-notifier https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
 The SHA identifies a commit on the **`release`** branch that carries the verified tarball. The commit and package contents are immutable:
@@ -63,7 +63,7 @@ Codex stores the user-scoped server in `~/.codex/config.toml`:
 
 ```sh
 codex mcp add apple-docs -- \
-  npx --yes --ignore-scripts --allow-remote=root \
+  npx --yes --ignore-scripts --allow-remote=root --no-audit --no-fund --no-update-notifier \
   https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
@@ -74,14 +74,14 @@ To update to a newer release, replace the server entry with the new release comm
 ```sh
 codex mcp remove apple-docs
 codex mcp add apple-docs -- \
-  npx --yes --ignore-scripts --allow-remote=root \
+  npx --yes --ignore-scripts --allow-remote=root --no-audit --no-fund --no-update-notifier \
   https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<new-release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
 Notes:
 
 - **Pin to the full release commit SHA**, not a branch or tag. Branches and ordinary tags can move.
-- **First launch per SHA:** `npx` downloads and caches the tarball. It does not download runtime dependencies because they are already bundled. Subsequent launches use npm's cache.
+- **First launch per SHA:** `npx` downloads and caches only the tarball. It does not download runtime dependencies because they are already bundled, and the command disables npm's audit and update-check requests. Subsequent launches use npm's cache.
 - **Treat package-lock updates as supply-chain changes.** Generate them inside the dev container with lifecycle scripts disabled, review the resolved versions and integrity hashes, and commit them with the corresponding dependency change.
 - **Update dependencies through the project wrapper.** Run `scripts/update-dependencies` to update every direct dependency to the newest eligible stable release, or pass one or more `<package>@<exact-version>` arguments for a targeted update. TypeScript and Node type definitions stay within the current major version because they track the supported lint toolchain and Node runtime. The wrapper runs pinned copies of npm, pnpm, and npm-check-updates in a disposable staging copy; enforces a three-day minimum release age; disables lifecycle scripts; generates the npm package lock and pnpm lock; validates registry sources and integrity hashes; builds the bundled production tree; and runs the compile, lint, test, and package checks. A final frozen offline install checks the pnpm lockfile. The repository remains unchanged unless every step succeeds, and only the manifest and two lockfiles are copied back.
 - **Build release artifacts through the project wrapper.** `scripts/build-npx-package` refuses to overwrite an existing tarball and copies an artifact out only after package-content and offline-install verification pass.
