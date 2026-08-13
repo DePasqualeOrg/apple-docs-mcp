@@ -36,13 +36,13 @@ Add this to your Claude Desktop configuration:
   "mcpServers": {
     "apple-docs": {
       "command": "npx",
-      "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+      "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
     }
   }
 }
 ```
 
-Replace `<full-commit-sha>` with a reviewed release commit from this fork. See `docs/releasing.md` for the release and pinning procedure.
+This URL identifies a reviewed, self-contained package tarball by its full release commit SHA. The bundled dependency tree is pinned, and `npx` is configured not to run lifecycle scripts or make audit, funding, or update-check requests. See `docs/releasing.md` for the release and pinning procedure.
 
 Restart Claude Desktop and start asking about Apple APIs!
 
@@ -52,7 +52,7 @@ Restart Claude Desktop and start asking about Apple APIs!
 <summary><strong>📱 Claude Code</strong></summary>
 
 ```bash
-claude mcp add apple-docs -- npx -y github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>
+claude mcp add apple-docs -- npx --yes --ignore-scripts --allow-remote=root --no-audit --no-fund --no-update-notifier https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
 [📖 Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp)
@@ -71,7 +71,7 @@ claude mcp add apple-docs -- npx -y github:DePasqualeOrg/apple-docs-mcp#<full-co
   "mcpServers": {
     "apple-docs": {
       "command": "npx",
-      "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+      "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
     }
   }
 }
@@ -93,7 +93,7 @@ Add to your VS Code MCP config:
       "apple-docs": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+        "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
       }
     }
   }
@@ -114,7 +114,7 @@ Add to your Windsurf MCP config:
   "mcpServers": {
     "apple-docs": {
       "command": "npx",
-      "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+      "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
     }
   }
 }
@@ -135,7 +135,7 @@ Add to your Zed `settings.json`:
     "Apple Docs": {
       "command": {
         "path": "npx",
-        "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+        "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
       },
       "settings": {}
     }
@@ -161,7 +161,7 @@ Add to your Zed `settings.json`:
   "mcpServers": {
     "apple-docs": {
       "command": "npx",
-      "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"],
+      "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"],
       "disabled": false,
       "autoApprove": []
     }
@@ -181,7 +181,7 @@ Add to your Zed `settings.json`:
   "mcpServers": {
     "apple-docs": {
       "command": "npx",
-      "args": ["-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"]
+      "args": ["--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"]
     }
   }
 }
@@ -201,7 +201,7 @@ For Windows systems, use:
   "mcpServers": {
     "apple-docs": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>"],
+      "args": ["/c", "npx", "--yes", "--ignore-scripts", "--allow-remote=root", "--no-audit", "--no-fund", "--no-update-notifier", "https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz"],
       "disabled": false,
       "autoApprove": []
     }
@@ -216,7 +216,7 @@ For Windows systems, use:
 
 **Direct Usage**:
 ```bash
-npx -y github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha> --help
+npx --yes --ignore-scripts --allow-remote=root --no-audit --no-fund --no-update-notifier https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/0b844f1148c9908da9552b384a6546d861b155fa/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz -- --help
 ```
 
 **Development Setup**:
