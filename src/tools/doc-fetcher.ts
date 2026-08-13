@@ -122,7 +122,7 @@ function formatSpecificAPIContent(jsonData: AppleDocJSON): string {
               content += `**${param.name}**: `;
               if (param.content?.[0]?.inlineContent) {
                 const paramDesc = param.content[0].inlineContent
-                  .map((inline) => (inline as { text?: string })?.text ?? '')
+                  .map((inline) => inline.text ?? '')
                   .join('');
                 content += `${paramDesc}\n\n`;
               }

@@ -55,7 +55,7 @@ jobs:
 
       - name: Build project
         run: |
-          pnpm run build
+          pnpm run compile
           if [ $? -ne 0 ]; then
             echo "❌ Build failed. Please ensure the project builds successfully."
             exit 1

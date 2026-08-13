@@ -25,25 +25,25 @@ no test reaches the network. Tests drive behavior through mocked
 
 ```bash
 # Run all tests
-pnpm test
+scripts/dx pnpm test
 
 # Run specific test file
-pnpm test tests/tools/search-framework-symbols.test.ts
+scripts/dx pnpm test tests/tools/search-framework-symbols.test.ts
 
 # Run tests with coverage
-pnpm test -- --coverage
+scripts/dx pnpm test -- --coverage
 
 # Run tests in watch mode
-pnpm test -- --watch
+scripts/dx pnpm test -- --watch
 
 # Run tests with verbose output
-pnpm test -- --verbose
+scripts/dx pnpm test -- --verbose
 ```
 
 These tests mock the network for determinism. To exercise the built server against the **live** Apple API (all 18 tools, scanned for rough edges), run the separate real-world check — it is not part of `pnpm test` and needs network egress:
 
 ```bash
-pnpm run check:live   # see scripts/realworld-check.mjs and AGENTS.md
+scripts/dx pnpm run check:live   # see scripts/realworld-check.mjs and AGENTS.md
 ```
 
 ## Test Coverage Areas

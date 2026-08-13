@@ -134,7 +134,7 @@ If apple-doc-mcp were kept instead, the equivalent fix list would be much heavie
 This fork runs in a dev container so third-party dependency code never executes on the host (supply chain mitigation). Edit source on the host; run everything that executes code through `scripts/dx`, which starts the container on first use:
 
 ```sh
-scripts/dx pnpm run build      # tsc + copy data/
+scripts/dx pnpm run compile    # tsc + copy data/
 scripts/dx pnpm test           # Jest (467 tests)
 scripts/dx pnpm run lint       # eslint
 ```

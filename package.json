@@ -10,8 +10,8 @@
   "files": [
     "dist",
     "data",
+    "npm-shrinkwrap.json",
     "README.md",
-    "README.*.md",
     "LICENSE"
   ],
   "repository": {
@@ -26,7 +26,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp -r data dist/",
+    "compile": "tsc && cp -r data dist/",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
@@ -36,8 +36,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --watchAll=false",
-    "check:live": "pnpm run build && node scripts/realworld-check.mjs",
-    "prepublishOnly": "pnpm run clean && pnpm run build && pnpm run test:ci",
+    "check:live": "pnpm run compile && node scripts/realworld-check.mjs",
+    "prepublishOnly": "pnpm run clean && pnpm run compile && pnpm run test:ci",
     "release:patch": "npm version patch && git push origin main --tags && npm publish",
     "release:minor": "npm version minor && git push origin main --tags && npm publish",
     "release:major": "npm version major && git push origin main --tags && npm publish"
@@ -60,19 +60,20 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@9.15.9",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.1",
-    "zod": "^4.0.5"
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@jest/globals": "^30.0.4",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^20.11.0",
-    "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
-    "eslint": "^8.57.1",
-    "jest": "^30.0.4",
-    "ts-jest": "^29.4.0",
-    "typescript": "^5.3.3"
+    "@jest/globals": "30.4.1",
+    "@types/jest": "30.0.0",
+    "@types/node": "26.2.0",
+    "@typescript-eslint/eslint-plugin": "8.66.0",
+    "@typescript-eslint/parser": "8.66.0",
+    "eslint": "8.57.1",
+    "jest": "30.4.2",
+    "ts-jest": "29.4.12",
+    "typescript": "5.9.3"
   }
 }

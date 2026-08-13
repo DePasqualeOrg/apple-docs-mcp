@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Resolve and verify dependency updates in a disposable staging copy. Only the
+# manifest and lockfiles are copied back to the repository.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+	echo "Usage: scripts/update-dependencies [<package>@<exact-version> ...]"
+	echo "Without package arguments, every direct dependency is updated to the newest eligible version."
+	exit 0
+fi
+
+staging_root="$(mktemp -d /tmp/apple-docs-dependency-update.XXXXXX)"
+stage_dir="$staging_root/work"
+original_dir="$staging_root/original"
+package_temp=""
+pnpm_temp=""
+shrinkwrap_temp=""
+
+cleanup() {
+	status=$?
+	trap - EXIT HUP INT TERM
+	rm -f "$package_temp" "$pnpm_temp" "$shrinkwrap_temp"
+	rm -rf "$staging_root"
+	exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mkdir -p "$stage_dir" "$original_dir"
+cp package.json pnpm-lock.yaml npm-shrinkwrap.json "$original_dir/"
+tar \
+	--exclude='./.git' \
+	--exclude='./node_modules' \
+	--exclude='./.pnpm-store' \
+	--exclude='./dist' \
+	--exclude='./coverage' \
+	-cf - . | tar -xf - -C "$stage_dir"
+
+image="apple-docs-mcp-dependency-update:local"
+docker build --tag "$image" --file .devcontainer/Dockerfile .
+docker run --rm \
+	--network bridge \
+	--read-only \
+	--env npm_config_cache=/tmp/npm-cache \
+	--env npm_config_ignore_scripts=true \
+	--env npm_config_min_release_age=3 \
+	--env npm_config_store_dir=/tmp/pnpm-store \
+	--volume "$stage_dir:/work" \
+	--tmpfs /tmp:rw,exec,mode=1777 \
+	--tmpfs /work/node_modules:rw,exec,mode=1777 \
+	--workdir /work \
+	"$image" \
+	bash /opt/apple-docs-maintenance/update-dependencies-in-container "$@"
+
+# Recheck the final files without network access after all project code has run.
+docker run --rm \
+	--network none \
+	--read-only \
+	--env npm_config_store_dir=/tmp/pnpm-store \
+	--volume "$stage_dir:/work" \
+	--tmpfs /tmp:rw,exec,mode=1777 \
+	--tmpfs /work/node_modules:rw,exec,mode=1777 \
+	--workdir /work \
+	"$image" \
+	bash -c 'pnpm install --frozen-lockfile --ignore-scripts --lockfile-only --offline && node /opt/apple-docs-maintenance/dependency-maintenance.mjs verify'
+
+for result in package.json pnpm-lock.yaml npm-shrinkwrap.json; do
+	if [ ! -f "$stage_dir/$result" ] || [ -L "$stage_dir/$result" ]; then
+		echo "Validated output is not a regular file: $result" >&2
+		exit 1
+	fi
+	if ! cmp -s "$original_dir/$result" "$result"; then
+		echo "$result changed while the dependency update was running; refusing to overwrite it." >&2
+		exit 1
+	fi
+done
+
+package_temp="$(mktemp ./.package.json.update.XXXXXX)"
+pnpm_temp="$(mktemp ./.pnpm-lock.yaml.update.XXXXXX)"
+shrinkwrap_temp="$(mktemp ./.npm-shrinkwrap.json.update.XXXXXX)"
+install -m 644 "$stage_dir/package.json" "$package_temp"
+install -m 644 "$stage_dir/pnpm-lock.yaml" "$pnpm_temp"
+install -m 644 "$stage_dir/npm-shrinkwrap.json" "$shrinkwrap_temp"
+mv "$package_temp" package.json
+package_temp=""
+mv "$pnpm_temp" pnpm-lock.yaml
+pnpm_temp=""
+mv "$shrinkwrap_temp" npm-shrinkwrap.json
+shrinkwrap_temp=""
+
+echo "Dependency update completed and verified. Review package.json, pnpm-lock.yaml, and npm-shrinkwrap.json before committing."

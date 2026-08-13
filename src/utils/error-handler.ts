@@ -23,7 +23,7 @@ export { ErrorType };
  */
 export function getErrorMessage(error: unknown): string {
   if (error !== null && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message: unknown }).message;
+    const { message } = error;
     return typeof message === 'string' ? message : String(message);
   }
   return String(error);

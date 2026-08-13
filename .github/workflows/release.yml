@@ -37,7 +37,7 @@ jobs:
         run: pnpm run test:ci
 
       - name: Build
-        run: pnpm run build
+        run: pnpm run compile
 
       - name: Verify package
         run: |

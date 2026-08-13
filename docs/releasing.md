@@ -13,7 +13,8 @@ npx -y github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>
 The SHA points at a commit on the **`release`** branch that carries a prebuilt `dist/`. This gives the robustness of the `npx apple-doc-mcp-server@1.9.6` setup it replaces — pinned, self-contained, fetch-on-demand — while keeping our constraints:
 
 - **No npm publish** (no package rename, no registry account needed).
-- **Supply-chain posture preserved:** the install runs only the two *runtime* deps (`@modelcontextprotocol/sdk`, `zod`) on the host, honoring the global 7-day quarantine. No dev toolchain and no `tsc` build run on the host, because `dist/` is prebuilt and committed on the release branch (no `prepare` script).
+- **Reproducible dependency tree:** `npm-shrinkwrap.json` pins the complete npm dependency tree, including transitive versions and registry integrity hashes. The two direct runtime dependencies are also exact versions in `package.json`.
+- **No lifecycle scripts:** the global npm configuration disables dependency lifecycle scripts. No dev toolchain or `tsc` build runs on the host because `dist/` is prebuilt and committed on the release branch.
 - **Immutable pin:** a full commit SHA can't move. Tags (`vX.Y.Z-fork.N`) are human-readable labels for the same commit.
 
 ## How it works (why the release branch is shaped this way)
@@ -36,7 +37,7 @@ scripts/dx pnpm run check:live      # live end-to-end against Apple
 git checkout release 2>/dev/null || git checkout -b release
 git reset --hard patches            # (or main / the ref you're releasing)
 
-# 3. Clean, JS-ONLY build — NOT `pnpm run build`, which copies data into dist/
+# 3. Clean, JS-ONLY build – NOT `pnpm run compile`, which copies data into dist/
 scripts/dx pnpm run clean
 scripts/dx pnpm exec tsc
 #    sanity check: dist/index.js exists, dist/data does NOT
@@ -56,7 +57,7 @@ git rev-parse HEAD
 
 # 7. Return to dev and restore a normal full dist for local work
 git checkout patches
-scripts/dx pnpm run build
+scripts/dx pnpm run compile
 ```
 
 Then repin the MCP config (next section) to the new SHA and restart Claude Code.
@@ -84,6 +85,8 @@ claude mcp add --scope user --transport stdio apple-docs -- \
 Notes:
 
 - **Pin to the full SHA**, not a branch (branches move) — that's the immutable pin.
-- **First launch per SHA** installs the runtime deps via `npx` (honoring the quarantine) and caches them; subsequent launches are fast. The install stays within the MCP client's startup timeout.
+- **First launch per SHA** installs the shrinkwrapped runtime dependency tree via `npx` and caches it; subsequent launches are fast. The committed shrinkwrap prevents newly published versions from entering that tree without a reviewed repository change.
+- **Treat shrinkwrap updates as supply-chain changes.** Generate them inside the dev container with lifecycle scripts disabled, review the resolved versions and integrity hashes, and commit them with the corresponding dependency change.
+- **Update dependencies through the project wrapper.** Run `scripts/update-dependencies` to update every direct dependency to the newest eligible stable release, or pass one or more `<package>@<exact-version>` arguments for a targeted update. The wrapper runs a pinned copy of npm-check-updates in a disposable staging copy, enforces a three-day minimum release age, disables lifecycle scripts, generates the npm shrinkwrap, imports it into pnpm, validates registry sources and integrity hashes, and runs the compile, lint, test, and package checks. A final frozen offline install checks the pnpm lockfile. The repository remains unchanged unless every step succeeds, and only the manifest and two lockfiles are copied back.
 - **Don't point projects at the dev working tree** (`node …/apple-docs-mcp/dist/index.js`) for everyday use — a mid-edit broken build would break every wired project. They run the tagged release artifact instead.
 - After swapping servers, update the "Apple developer documentation" section in `~/.claude/CLAUDE.md` to the fork's tool interface (it otherwise still documents the old `apple-doc-mcp` `choose_technology` workflow).

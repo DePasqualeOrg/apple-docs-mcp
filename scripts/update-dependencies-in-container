@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tool_dir="$(cd "$(dirname "$0")" && pwd)"
+
+if [ "$#" -eq 0 ]; then
+	ncu --upgrade \
+		--target latest \
+		--cooldown 3 \
+		--packageManager npm \
+		--reject pnpm \
+		--install never \
+		--format group,cooldown
+else
+	node "$tool_dir/dependency-maintenance.mjs" set "$@"
+fi
+env -u npm_config_store_dir npm install --package-lock-only --ignore-scripts --min-release-age=3 --no-audit --no-fund
+env -u npm_config_store_dir npm shrinkwrap
+pnpm import
+pnpm install --frozen-lockfile --ignore-scripts
+node "$tool_dir/dependency-maintenance.mjs" verify
+pnpm run compile
+pnpm run lint
+pnpm test
+env -u npm_config_store_dir npm pack --dry-run --ignore-scripts --json >/tmp/npm-pack.json 2>/tmp/npm-pack.log
+node "$tool_dir/dependency-maintenance.mjs" verify-pack /tmp/npm-pack.json
+
+echo "Dependency update staging copy completed and verified."

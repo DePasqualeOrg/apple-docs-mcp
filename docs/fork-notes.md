@@ -23,7 +23,7 @@ All commands run in the dev container (see `AGENTS.md`):
 scripts/dx pnpm exec tsc --noEmit   # types
 scripts/dx pnpm test                # unit/integration (network mocked)
 scripts/dx pnpm run lint            # eslint — expect 0 errors
-scripts/dx pnpm run build           # tsc + copy data/ to dist/
+scripts/dx pnpm run compile         # tsc + copy data/ to dist/
 scripts/dx pnpm run check:live      # end-to-end against the LIVE Apple API (scripts/realworld-check.mjs)
 ```
 
@@ -46,4 +46,4 @@ Deferred by choice (no clear net win — revisit only if the tradeoff changes):
 
 For the **production** delivery (a pinned `npx github:` install wired across projects) and the runbook for cutting a release, see `docs/releasing.md`.
 
-For **interactive testing during development**: Claude Code loads MCP servers at session start, and **local scope is keyed to the session's project root** (e.g. `…/projects/forked`, not the `apple-docs-mcp/` subdirectory) — register at the session root or use user scope, then restart the session. The dev build runs on the host via `node dist/index.js`, which needs a host `node_modules` (`pnpm install --frozen-lockfile --ignore-scripts`, honoring the 7-day quarantine); the dev container's named `node_modules` volume shadows the host one, so the two coexist. Alternatively, run it inside the container as the MCP command for full isolation.
+For **interactive testing during development**: Claude Code loads MCP servers at session start, and **local scope is keyed to the session's project root** (e.g. `…/projects/forked`, not the `apple-docs-mcp/` subdirectory) – register at the session root or use user scope, then restart the session. Compile through `scripts/dx`, then configure the MCP command as `scripts/dx node dist/index.js` so dependencies and the server remain inside the development container. Do not install dependencies or run the server directly on the host.
