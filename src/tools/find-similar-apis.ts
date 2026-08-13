@@ -143,7 +143,7 @@ export async function handleFindSimilarApis(
     if (errorMessage.includes('Invalid Apple Developer Documentation URL')) {
       throw error;
     }
-    throw new Error(errorMessage);
+    throw new Error(errorMessage, { cause: error });
   }
 }
 

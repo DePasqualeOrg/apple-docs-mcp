@@ -242,7 +242,6 @@ function applyOverviewsFilters(
         }
 
         // Include children of category items (prefer non-empty path, else url)
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         if (overview.path || overview.url) {
           // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
           const overviewPath = (overview.path || overview.url).replace('https://developer.apple.com', '');

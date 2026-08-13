@@ -34,5 +34,5 @@ Run it after changes that touch fetching, parsing, formatting, the MCP wiring, o
 
 ## Project notes
 
-- This is a fork of `kimsungwhee/apple-docs-mcp`. The package manager is **pnpm** (`pnpm-lock.yaml`, lockfileVersion 9.0); the bundled `package-lock.json` is from upstream and is not used here.
+- This is a fork of `kimsungwhee/apple-docs-mcp`. Use **pnpm** with `pnpm-lock.yaml` for development. The npm 12 `package-lock.json` pins the production tree, and `bundleDependencies` ships that reviewed runtime tree with the package. Regenerate both lockfiles only through `scripts/update-dependencies`.
 - See `docs/server-comparison.md` for the evaluation that led to standardizing on this server, and the prioritized fix list it tracks.

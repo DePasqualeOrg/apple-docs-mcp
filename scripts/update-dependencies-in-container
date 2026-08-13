@@ -8,21 +8,38 @@ if [ "$#" -eq 0 ]; then
 		--target latest \
 		--cooldown 3 \
 		--packageManager npm \
-		--reject pnpm \
+		--reject pnpm,typescript,@types/node \
+		--install never \
+		--format group,cooldown
+	ncu --upgrade \
+		--target minor \
+		--cooldown 3 \
+		--packageManager npm \
+		--filter typescript,@types/node \
 		--install never \
 		--format group,cooldown
 else
 	node "$tool_dir/dependency-maintenance.mjs" set "$@"
 fi
-env -u npm_config_store_dir npm install --package-lock-only --ignore-scripts --min-release-age=3 --no-audit --no-fund
-env -u npm_config_store_dir npm shrinkwrap
+env -u pnpm_config_store_dir npm install --package-lock-only --ignore-scripts --min-release-age=3 --no-audit --no-fund
 pnpm import
 pnpm install --frozen-lockfile --ignore-scripts
 node "$tool_dir/dependency-maintenance.mjs" verify
 pnpm run compile
 pnpm run lint
 pnpm test
-env -u npm_config_store_dir npm pack --dry-run --ignore-scripts --json >/tmp/npm-pack.json 2>/tmp/npm-pack.log
+env -u pnpm_config_store_dir npm ci --omit=dev --ignore-scripts --min-release-age=3 --no-audit --no-fund
+env -u pnpm_config_store_dir npm pack --ignore-scripts --json --pack-destination /tmp >/tmp/npm-pack.json 2>/tmp/npm-pack.log
 node "$tool_dir/dependency-maintenance.mjs" verify-pack /tmp/npm-pack.json
+mkdir -p /tmp/package-smoke
+env -u pnpm_config_store_dir npm_config_cache=/tmp/npm-smoke-cache npm install \
+	--prefix /tmp/package-smoke \
+	--ignore-scripts \
+	--offline \
+	--no-audit \
+	--no-fund \
+	/tmp/*.tgz
+test -f /tmp/package-smoke/node_modules/@kimsungwhee/apple-docs-mcp/node_modules/@modelcontextprotocol/sdk/package.json
+test -f /tmp/package-smoke/node_modules/@kimsungwhee/apple-docs-mcp/node_modules/zod/package.json
 
 echo "Dependency update staging copy completed and verified."

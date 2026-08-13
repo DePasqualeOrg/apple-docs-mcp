@@ -9,8 +9,7 @@ To protect the `main` branch, configure the following rules in GitHub:
 ### 2. Add branch protection rule for `main`
 
 **Required status checks:**
-- [x] CI / Test (18.x)
-- [x] CI / Test (20.x)
+- [x] CI / Test (24.x)
 - [x] CI / Build
 - [x] CI / Type Check
 - [x] PR Check / PR Validation

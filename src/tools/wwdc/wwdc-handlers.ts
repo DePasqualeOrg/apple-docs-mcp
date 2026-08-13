@@ -595,7 +595,6 @@ function formatVideoDetail(
   // Resource links — logical OR presence check across the resource fields;
   // `??` would stop at the first non-nullish (e.g. an empty string) instead of
   // testing the others, so `||` is correct here.
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
   if (video.resources.hdVideo || video.resources.sdVideo || video.resources.resourceLinks) {
     content += '\n**Resources:**\n';
     if (video.resources.hdVideo) {

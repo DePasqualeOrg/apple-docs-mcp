@@ -20,7 +20,7 @@ services:
       # Keep node_modules in a named volume (not on the host bind mount).
       - node_modules:/workspace/node_modules
       # Keep the pnpm store in a named volume too (persists across rebuilds,
-      # stays off the host bind mount). Matches npm_config_store_dir in the image.
+      # stays off the host bind mount). Matches pnpm_config_store_dir in the image.
       - pnpm_store:/workspace/.pnpm-store
       # Exclude .git from the bind mount (uses an anonymous volume).
       - /workspace/.git

@@ -73,69 +73,79 @@ function verifyRootSection(manifest, root, section) {
   const expected = manifest[section] ?? {};
   const locked = root[section] ?? {};
   if (Object.keys(expected).length !== Object.keys(locked).length) {
-    fail(`npm-shrinkwrap.json does not match package.json ${section}`);
+    fail(`package-lock.json does not match package.json ${section}`);
   }
   for (const [name, version] of Object.entries(expected)) {
     if (locked[name] !== version) {
-      fail(`npm-shrinkwrap.json does not pin ${section}.${name} to ${version}`);
+      fail(`package-lock.json does not pin ${section}.${name} to ${version}`);
     }
   }
 }
 
-function verifyShrinkwrap(manifest, shrinkwrap) {
-  if (shrinkwrap.lockfileVersion !== 3) {
-    fail(`unsupported npm shrinkwrap version: ${shrinkwrap.lockfileVersion}`);
+function verifyPackageLock(manifest, lockfile) {
+  if (lockfile.lockfileVersion !== 3) {
+    fail(`unsupported npm package lock version: ${lockfile.lockfileVersion}`);
   }
 
-  const root = shrinkwrap.packages?.[''];
+  const root = lockfile.packages?.[''];
   if (!root) {
-    fail('npm-shrinkwrap.json has no root package entry');
+    fail('package-lock.json has no root package entry');
   }
 
   for (const section of ['dependencies', 'devDependencies']) {
     verifyRootSection(manifest, root, section);
     for (const [name, version] of Object.entries(manifest[section] ?? {})) {
-      const entry = shrinkwrap.packages[`node_modules/${name}`];
+      const entry = lockfile.packages[`node_modules/${name}`];
       if (!entry || entry.version !== version) {
-        fail(`npm-shrinkwrap.json does not install ${name} at ${version}`);
+        fail(`package-lock.json does not install ${name} at ${version}`);
       }
     }
   }
 
-  for (const [path, entry] of Object.entries(shrinkwrap.packages)) {
+  for (const [path, entry] of Object.entries(lockfile.packages)) {
     if (path === '' || entry.link) {
       continue;
     }
     if (!entry.version) {
-      fail(`shrinkwrap entry has no exact version: ${path}`);
+      fail(`package lock entry has no exact version: ${path}`);
     }
     if (!entry.resolved?.startsWith('https://registry.npmjs.org/')) {
-      fail(`shrinkwrap entry does not use the public npm registry: ${path}`);
+      fail(`package lock entry does not use the public npm registry: ${path}`);
     }
     if (!entry.integrity) {
-      fail(`shrinkwrap entry has no integrity hash: ${path}`);
+      fail(`package lock entry has no integrity hash: ${path}`);
     }
   }
 }
 
 async function verify() {
   const manifest = await readJson('package.json');
-  const shrinkwrap = await readJson('npm-shrinkwrap.json');
+  const lockfile = await readJson('package-lock.json');
   verifyExactDirectDependencies(manifest);
-  verifyShrinkwrap(manifest, shrinkwrap);
-  console.log(`Verified ${Object.keys(shrinkwrap.packages).length - 1} shrinkwrapped package entries.`);
+  verifyPackageLock(manifest, lockfile);
+  console.log(`Verified ${Object.keys(lockfile.packages).length - 1} npm package-lock entries.`);
 }
 
 async function verifyPack(path) {
   const report = await readJson(path);
-  const files = report[0]?.files;
+  const entries = Array.isArray(report) ? report : Object.values(report);
+  const entry = entries.length === 1 ? entries[0] : undefined;
+  const files = entry?.files;
   if (!Array.isArray(files)) {
     fail('npm pack did not produce a valid file report');
   }
   const paths = new Set(files.map((file) => file.path));
-  for (const required of ['dist/index.js', 'npm-shrinkwrap.json', 'package.json']) {
+  for (const required of ['dist/index.js', 'package.json']) {
     if (!paths.has(required)) {
       fail(`packed artifact is missing ${required}`);
+    }
+  }
+
+  const bundled = new Set(entry.bundled ?? []);
+  const manifest = await readJson('package.json');
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    if (!bundled.has(name)) {
+      fail(`packed artifact does not bundle runtime dependency ${name}`);
     }
   }
   console.log(`Verified packed artifact contents (${files.length} files).`);
