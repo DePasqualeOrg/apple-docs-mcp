@@ -1,92 +1,89 @@
 # Releasing & wiring the fork
 
-How the DePasqualeOrg fork is delivered to Claude Code projects, and the runbook for cutting a new release. This is the **production** delivery (a pinned `npx github:` install); for connecting the live dev build during development, see the "Connecting as an MCP server" note in `fork-notes.md`.
+How the DePasqualeOrg fork is delivered to Codex and Claude Code projects, and the runbook for cutting a new release. This is the production delivery through a pinned package tarball. For connecting the live dev build during development, see the "Connecting as an MCP server" note in `fork-notes.md`.
 
 ## Delivery model
 
-Projects run the fork via an immutable, pinned GitHub install — no npm registry:
+Projects run the fork from an immutable package tarball stored in the GitHub repository, without using the npm registry:
 
 ```
-npx -y github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>
+npx --yes --ignore-scripts --allow-remote=root https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
-The SHA points at a commit on the **`release`** branch that carries a prebuilt `dist/`. This gives the robustness of the `npx apple-doc-mcp-server@1.9.6` setup it replaces — pinned, self-contained, fetch-on-demand — while keeping our constraints:
+The SHA identifies a commit on the **`release`** branch that carries the verified tarball. The commit and package contents are immutable:
 
-- **No npm publish** (no package rename, no registry account needed).
-- **Reproducible dependency tree:** `package-lock.json` pins the complete npm dependency tree, including transitive versions and registry integrity hashes. The reviewed runtime tree is bundled into the package, and the two direct runtime dependencies are exact versions in `package.json`.
-- **No lifecycle scripts:** the global npm configuration disables dependency lifecycle scripts. No dev toolchain or `tsc` build runs on the host because `dist/` is prebuilt and committed on the release branch.
-- **Immutable pin:** a full commit SHA can't move. Tags (`vX.Y.Z-fork.N`) are human-readable labels for the same commit.
+- **No npm publish:** No package rename or registry account is needed.
+- **Reproducible dependency tree:** `package-lock.json` pins the complete npm dependency tree, including transitive versions and registry integrity hashes. The tarball physically contains that reviewed runtime tree, so `npx` does not resolve dependencies from the registry.
+- **No lifecycle scripts:** `npx` receives `--ignore-scripts`, and the tarball already contains compiled JavaScript and runtime dependencies. No compiler or dependency lifecycle script runs on the host.
+- **Immutable pin:** The raw GitHub URL contains the full commit SHA. Moving a branch or tag cannot change the bytes at that URL.
 
 ## How it works (why the release branch is shaped this way)
 
-- `patches`/`main` keep `dist/` **gitignored** (it's build output). The **`release`** branch force-commits the compiled JS so a `npx`-from-GitHub checkout has a runnable `bin` (`dist/index.js`) with no build step.
-- The release artifact is **JS-only** (`dist/**/*.js`, no `dist/data`). The WWDC snapshot lives at the repo root in `data/` (tracked) and is shipped via package.json `files`. At runtime, `getWWDCDataDirectory()` (`src/utils/wwdc-data-source-path.ts`) uses `dist/data` when present (npm/build layout) and otherwise falls back to the package-root `data/` (this git-checkout layout). So the small JS-only artifact still finds the data, with no duplication.
+- `patches`/`main` contain source and lockfiles. Generated `.tgz` files remain ignored there.
+- `scripts/build-npx-package` creates the package in a disposable container, verifies both lockfiles, compiles the server, installs the npm production tree with lifecycle scripts disabled, packs the project, and installs the tarball offline with an empty npm cache.
+- The **`release`** branch is rebuilt from the source commit and force-adds the verified tarball under `artifacts/`. Codex and Claude Code download that tarball by the release commit SHA.
 
 ## Cutting a release
 
-All build/test commands run in the dev container via `scripts/dx`.
+All dependency, build, and package commands run in containers.
 
 ```sh
-# 1. Land your changes on patches (or main) and verify
-scripts/dx pnpm exec tsc --noEmit
-scripts/dx pnpm test
-scripts/dx pnpm run lint            # expect 0 errors
-scripts/dx pnpm run check:live      # live end-to-end against Apple
+# 1. Land and verify source changes on patches.
+scripts/update-dependencies
 
-# 2. Point the release branch at the source commit you're releasing
-git checkout release 2>/dev/null || git checkout -b release
-git reset --hard patches            # (or main / the ref you're releasing)
+# 2. Build the self-contained tarball.
+artifact_dir="$(mktemp -d /tmp/apple-docs-release.XXXXXX)"
+scripts/build-npx-package "$artifact_dir"
 
-# 3. Clean, JS-ONLY build – NOT `pnpm run compile`, which copies data into dist/
-scripts/dx pnpm run clean
-scripts/dx pnpm exec tsc
-#    sanity check: dist/index.js exists, dist/data does NOT
-[ -f dist/index.js ] && [ ! -d dist/data ] && echo "ok: js-only artifact" || echo "WRONG: rebuild"
+# 3. Rebuild the release branch in a temporary worktree.
+release_parent="$(mktemp -d /tmp/apple-docs-release-tree.XXXXXX)"
+release_tree="$release_parent/worktree"
+git worktree add "$release_tree" release
+git -C "$release_tree" reset --hard patches
+mkdir -p "$release_tree/artifacts"
+cp "$artifact_dir"/*.tgz "$release_tree/artifacts/"
+git -C "$release_tree" add -f artifacts
+git -C "$release_tree" commit -m "Build npx release artifact"
 
-# 4. Commit the built dist (force — dist is gitignored) and tag
-git add -f dist
-git commit -m "release: build artifact (vX.Y.Z-fork.N)"
-git tag vX.Y.Z-fork.N
+# 4. Push with lease protection and record the immutable pin.
+git -C "$release_tree" push --force-with-lease origin release
+release_sha="$(git -C "$release_tree" rev-parse HEAD)"
+echo "$release_sha"
 
-# 5. Push (force the branch — it's rebuilt each release; use a NEW tag each time)
-git push -f origin release
-git push origin vX.Y.Z-fork.N
-
-# 6. The pin is this commit's SHA:
-git rev-parse HEAD
-
-# 7. Return to dev and restore a normal full dist for local work
-git checkout patches
-scripts/dx pnpm run compile
+# 5. Remove the temporary worktree and directories.
+git worktree remove "$release_tree"
+rm -rf "$artifact_dir" "$release_parent"
 ```
 
-Then repin the MCP config (next section) to the new SHA and restart Claude Code.
+Then replace `<release-commit-sha>` in the MCP command and restart the client.
 
 ## Wiring into projects
 
-One **user-scope** entry covers every current and future project:
+Codex stores the user-scoped server in `~/.codex/config.toml`:
 
 ```sh
-claude mcp add --scope user --transport stdio apple-docs -- \
-  npx -y github:DePasqualeOrg/apple-docs-mcp#<full-commit-sha>
+codex mcp add apple-docs -- \
+  npx --yes --ignore-scripts --allow-remote=root \
+  https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
-Then restart Claude Code (or `claude --continue` to resume the current conversation) — MCP servers load at session start.
+Restart Codex after changing the entry because MCP servers load at task start.
 
-To update to a newer release, repin to the new SHA:
+To update to a newer release, replace the server entry with the new release commit SHA:
 
 ```sh
-claude mcp remove apple-docs -s user
-claude mcp add --scope user --transport stdio apple-docs -- \
-  npx -y github:DePasqualeOrg/apple-docs-mcp#<new-full-sha>
-# restart Claude Code
+codex mcp remove apple-docs
+codex mcp add apple-docs -- \
+  npx --yes --ignore-scripts --allow-remote=root \
+  https://raw.githubusercontent.com/DePasqualeOrg/apple-docs-mcp/<new-release-commit-sha>/artifacts/kimsungwhee-apple-docs-mcp-1.0.26.tgz
 ```
 
 Notes:
 
-- **Pin to the full SHA**, not a branch (branches move) — that's the immutable pin.
-- **First launch per SHA** installs and caches the package via `npx`; subsequent launches are fast. The package contains the reviewed runtime dependency tree, so installation does not resolve newer transitive versions.
+- **Pin to the full release commit SHA**, not a branch or tag. Branches and ordinary tags can move.
+- **First launch per SHA:** `npx` downloads and caches the tarball. It does not download runtime dependencies because they are already bundled. Subsequent launches use npm's cache.
 - **Treat package-lock updates as supply-chain changes.** Generate them inside the dev container with lifecycle scripts disabled, review the resolved versions and integrity hashes, and commit them with the corresponding dependency change.
 - **Update dependencies through the project wrapper.** Run `scripts/update-dependencies` to update every direct dependency to the newest eligible stable release, or pass one or more `<package>@<exact-version>` arguments for a targeted update. TypeScript and Node type definitions stay within the current major version because they track the supported lint toolchain and Node runtime. The wrapper runs pinned copies of npm, pnpm, and npm-check-updates in a disposable staging copy; enforces a three-day minimum release age; disables lifecycle scripts; generates the npm package lock and pnpm lock; validates registry sources and integrity hashes; builds the bundled production tree; and runs the compile, lint, test, and package checks. A final frozen offline install checks the pnpm lockfile. The repository remains unchanged unless every step succeeds, and only the manifest and two lockfiles are copied back.
-- **Don't point projects at the dev working tree** (`node …/apple-docs-mcp/dist/index.js`) for everyday use — a mid-edit broken build would break every wired project. They run the tagged release artifact instead.
+- **Build release artifacts through the project wrapper.** `scripts/build-npx-package` refuses to overwrite an existing tarball and copies an artifact out only after package-content and offline-install verification pass.
+- **Do not point projects at the dev working tree** (`node …/apple-docs-mcp/dist/index.js`) for everyday use. A mid-edit broken build would break every wired project.
 - After swapping servers, update the "Apple developer documentation" section in `~/.claude/CLAUDE.md` to the fork's tool interface (it otherwise still documents the old `apple-doc-mcp` `choose_technology` workflow).

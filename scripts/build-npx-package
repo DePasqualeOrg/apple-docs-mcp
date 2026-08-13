@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Build and verify the self-contained package used by pinned npx installations.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
+	echo "Usage: scripts/build-npx-package <output-directory>"
+	exit 0
+fi
+if [ "$#" -ne 1 ]; then
+	echo "Usage: scripts/build-npx-package <output-directory>" >&2
+	exit 2
+fi
+
+mkdir -p "$1"
+output_dir="$(cd "$1" && pwd)"
+staging_root="$(mktemp -d /tmp/apple-docs-package.XXXXXX)"
+stage_dir="$staging_root/work"
+store_dir="$staging_root/pnpm-store"
+artifact_dir="$staging_root/artifacts"
+
+cleanup() {
+	status=$?
+	trap - EXIT HUP INT TERM
+	rm -rf "$staging_root"
+	exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mkdir -p "$stage_dir" "$store_dir" "$artifact_dir"
+chmod 777 "$artifact_dir"
+tar \
+	--exclude='./.git' \
+	--exclude='./node_modules' \
+	--exclude='./.pnpm-store' \
+	--exclude='./dist' \
+	--exclude='./coverage' \
+	--exclude='*.tgz' \
+	-cf - . | tar -xf - -C "$stage_dir"
+
+image="apple-docs-mcp-package-build:local"
+docker build --target dependency-tools --tag "$image" --file .devcontainer/Dockerfile .
+docker run --rm \
+	--network bridge \
+	--read-only \
+	--env npm_config_cache=/tmp/npm-cache \
+	--env npm_config_ignore_scripts=true \
+	--env npm_config_min_release_age=3 \
+	--env NO_UPDATE_NOTIFIER=1 \
+	--env pnpm_config_store_dir=/tmp/pnpm-store \
+	--env XDG_CACHE_HOME=/tmp/pnpm-store/cache \
+	--volume "$stage_dir:/work" \
+	--volume "$store_dir:/tmp/pnpm-store" \
+	--volume "$artifact_dir:/artifacts" \
+	--tmpfs /tmp:rw,exec,mode=1777 \
+	--tmpfs /work/node_modules:rw,exec,mode=1777 \
+	--workdir /work \
+	"$image" \
+	bash -c '
+		set -euo pipefail
+		pnpm install --frozen-lockfile --ignore-scripts
+		node /opt/apple-docs-maintenance/dependency-maintenance.mjs verify
+		pnpm run compile
+		npm ci --omit=dev --ignore-scripts --min-release-age=3 --no-audit --no-fund
+		npm pack --ignore-scripts --json --pack-destination /artifacts >/tmp/npm-pack.json
+		node /opt/apple-docs-maintenance/dependency-maintenance.mjs verify-pack /tmp/npm-pack.json
+		mkdir -p /tmp/package-check
+		npm_config_cache=/tmp/npm-check-cache npm install \
+			--prefix /tmp/package-check \
+			--ignore-scripts \
+			--offline \
+			--no-audit \
+			--no-fund \
+			/artifacts/*.tgz
+		test -f /tmp/package-check/node_modules/@kimsungwhee/apple-docs-mcp/dist/index.js
+		test -f /tmp/package-check/node_modules/@kimsungwhee/apple-docs-mcp/node_modules/@modelcontextprotocol/sdk/package.json
+		test -f /tmp/package-check/node_modules/@kimsungwhee/apple-docs-mcp/node_modules/zod/package.json
+	'
+
+shopt -s nullglob
+artifacts=("$artifact_dir"/*.tgz)
+if [ "${#artifacts[@]}" -ne 1 ]; then
+	echo "Expected exactly one package artifact, found ${#artifacts[@]}." >&2
+	exit 1
+fi
+
+target="$output_dir/${artifacts[0]##*/}"
+if [ -e "$target" ]; then
+	echo "Refusing to overwrite existing artifact: $target" >&2
+	exit 1
+fi
+install -m 644 "${artifacts[0]}" "$target"
+echo "Verified package artifact: $target"
